@@ -85,4 +85,9 @@ var (
 	// ErrNoClosedChannels is returned when a node is queries for all the
 	// channels it has closed, but it hasn't yet closed any channels.
 	ErrNoClosedChannels = fmt.Errorf("no channel have been closed yet")
+
+	// ErrChannelNotFound is returned when we are looking for a specific channel
+	// opening state in the FundingManager's internal database, but the channel
+	// in question is not considered being in an opening state.
+	ErrChannelNotFound = fmt.Errorf("channel not found in db")
 )
