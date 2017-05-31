@@ -1581,7 +1581,8 @@ func copyPubKey(pub *btcec.PublicKey) *btcec.PublicKey {
 	}
 }
 
-func (f *fundingManager) saveChannelOpeningState(chanPoint *wire.OutPoint, state channelOpeningState, shortChanID *lnwire.ShortChannelID) error {
+func (f *fundingManager) saveChannelOpeningState(chanPoint *wire.OutPoint,
+	state channelOpeningState, shortChanID *lnwire.ShortChannelID) error {
 	return f.cfg.Wallet.ChannelDB.Update(func(tx *bolt.Tx) error {
 
 		bucket, err := tx.CreateBucketIfNotExists(channelOpeningStateBucket)
@@ -1606,7 +1607,8 @@ func (f *fundingManager) saveChannelOpeningState(chanPoint *wire.OutPoint, state
 	})
 }
 
-func (f *fundingManager) getChannelOpeningState(chanPoint *wire.OutPoint) (channelOpeningState, *lnwire.ShortChannelID, error) {
+func (f *fundingManager) getChannelOpeningState(chanPoint *wire.OutPoint) (
+	channelOpeningState, *lnwire.ShortChannelID, error) {
 
 	var state channelOpeningState
 	var shortChanID lnwire.ShortChannelID
