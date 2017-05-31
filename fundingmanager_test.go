@@ -307,9 +307,8 @@ var estimator lnwallet.StaticFeeEstimator
 var aliceTestDir string
 var bobTestDir string
 
+// NB: Can only be called after setupFundingManagers is run.
 func recreateAliceFundingManager(t *testing.T) {
-	fmt.Println("setupAliceFundingManager")
-
 	aliceMsgChan = make(chan lnwire.Message)
 	aliceAnnounceChan = make(chan lnwire.Message)
 

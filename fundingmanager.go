@@ -338,7 +338,7 @@ func (f *fundingManager) Start() error {
 			go f.sendFundingLocked(channel, shortChanID)
 
 		case fundingLockedSent:
-			// fundingLocked was sent to peer, put the channel announcement was not
+			// fundingLocked was sent to peer, but the channel announcement was not
 			// sent.
 			go f.sendChannelAnnouncement(channel, lnChannel, shortChanID)
 
@@ -1063,9 +1063,10 @@ func (f *fundingManager) sendFundingLocked(completeChan *channeldb.OpenChannel,
 		return
 	}
 
-	// As the funding is now locked in and sent to the peer, the channel is
+	// As the fundingLocked message is now sent to the peer, the channel is
 	// moved to the next state of the state machine. It will be moved to the
-	// last state after the channel is finally announced.
+	// last state (actually deleted from the database) after the channel is
+	// finally announced.
 	err = f.saveChannelOpeningState(completeChan.ChanID, fundingLockedSent,
 		shortChanID)
 	if err != nil {
@@ -1074,7 +1075,6 @@ func (f *fundingManager) sendFundingLocked(completeChan *channeldb.OpenChannel,
 	}
 
 	f.sendChannelAnnouncement(completeChan, channel, shortChanID)
-
 }
 
 func (f *fundingManager) sendChannelAnnouncement(completeChan *channeldb.OpenChannel,
@@ -1088,7 +1088,6 @@ func (f *fundingManager) sendChannelAnnouncement(completeChan *channeldb.OpenCha
 
 	// Register the new link with the L3 routing manager so this new
 	// channel can be utilized during path finding.
-
 	err := f.announceChannel(f.cfg.IDKey, completeChan.IdentityPub,
 		channel.LocalFundingKey, channel.RemoteFundingKey,
 		*shortChanID, chanID, &fundingPoint)
@@ -1581,6 +1580,8 @@ func copyPubKey(pub *btcec.PublicKey) *btcec.PublicKey {
 	}
 }
 
+// saveChannelOpeningState saves the channelOpeningState for the provided
+// chanPoint to the channelOpeningStateBucket.
 func (f *fundingManager) saveChannelOpeningState(chanPoint *wire.OutPoint,
 	state channelOpeningState, shortChanID *lnwire.ShortChannelID) error {
 	return f.cfg.Wallet.ChannelDB.Update(func(tx *bolt.Tx) error {
@@ -1607,6 +1608,9 @@ func (f *fundingManager) saveChannelOpeningState(chanPoint *wire.OutPoint,
 	})
 }
 
+// getChannelOpeningState fetches the channelOpeningState for the provided
+// chanPoint from the database, or returns channeldb.ErrChannelNotFound if the
+// channel is not found.
 func (f *fundingManager) getChannelOpeningState(chanPoint *wire.OutPoint) (
 	channelOpeningState, *lnwire.ShortChannelID, error) {
 
@@ -1642,6 +1646,7 @@ func (f *fundingManager) getChannelOpeningState(chanPoint *wire.OutPoint) (
 	return state, &shortChanID, nil
 }
 
+// deleteChannelOpeningState removes any state for chanPoint from the database.
 func (f *fundingManager) deleteChannelOpeningState(chanPoint *wire.OutPoint) error {
 	return f.cfg.Wallet.ChannelDB.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(channelOpeningStateBucket)
