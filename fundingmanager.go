@@ -311,8 +311,8 @@ func (f *fundingManager) Start() error {
 	for _, channel := range openChannels {
 		channelState, shortChanID, err := f.getChannelOpeningState(channel.ChanID)
 		if err == channeldb.ErrChannelNotFound {
-			// Channel not in fundingManager's opening database, meaning it was successully
-			// announced to the network.
+			// Channel not in fundingManager's opening database, meaning it was
+			// successully announced to the network.
 			continue
 		} else if err != nil {
 			return err
@@ -327,18 +327,19 @@ func (f *fundingManager) Start() error {
 			return err
 		}
 
-		// If we did find the channel in the opening state database, we have seen the funding
-		// transaction being confirmed, but we did not finish the rest of the setup
-		// procedure before we shut down. We handle the remainding steps of this setup
-		// by continuing the procedure where we left off.
+		// If we did find the channel in the opening state database, we have seen
+		// the funding transaction being confirmed, but we did not finish the rest
+		// of the setup procedure before we shut down. We handle the remainding
+		// steps of this setup by continuing the procedure where we left off.
 		switch channelState {
 		case markedOpen:
-			// The funding transaction was confirmed, but we did not successfully send the
-			// fundingLocked message to the peer, so let's do that now.
+			// The funding transaction was confirmed, but we did not successfully
+			// send the fundingLocked message to the peer, so let's do that now.
 			go f.sendFundingLocked(channel, shortChanID)
 
 		case fundingLockedSent:
-			// fundingLocked was sent to peer, put the channel announcement was not sent.
+			// fundingLocked was sent to peer, put the channel announcement was not
+			// sent.
 			go f.sendChannelAnnouncement(channel, lnChannel, shortChanID)
 
 		default:
@@ -1020,11 +1021,14 @@ func (f *fundingManager) waitForFundingConfirmation(completeChan *channeldb.Open
 	// fundingManager's internal persistant state machine that we use to track
 	// the remainding process of the channel opening. This is useful to resume
 	// the opening process in case of restarts.
-	if err = f.saveChannelOpeningState(completeChan.ChanID, markedOpen, &shortChanID); err != nil {
+	err = f.saveChannelOpeningState(completeChan.ChanID, markedOpen, &shortChanID)
+	if err != nil {
 		fndgLog.Errorf("error setting channel state to markedOpen: %v", err)
 		return
 	}
 
+	// Now that the funding transaction has the required number of confirmations,
+	// we send the fundingLocked message to the peer.
 	f.sendFundingLocked(completeChan, &shortChanID)
 }
 
@@ -1053,7 +1057,8 @@ func (f *fundingManager) sendFundingLocked(completeChan *channeldb.OpenChannel,
 	}
 	fundingLockedMsg := lnwire.NewFundingLocked(chanID, nextRevocation)
 
-	if err = f.cfg.SendToPeer(completeChan.IdentityPub, fundingLockedMsg); err != nil {
+	err = f.cfg.SendToPeer(completeChan.IdentityPub, fundingLockedMsg)
+	if err != nil {
 		fndgLog.Errorf("unable to send fundingLocked to peer: %v", err)
 		return
 	}
@@ -1061,7 +1066,9 @@ func (f *fundingManager) sendFundingLocked(completeChan *channeldb.OpenChannel,
 	// As the funding is now locked in and sent to the peer, the channel is
 	// moved to the next state of the state machine. It will be moved to the
 	// last state after the channel is finally announced.
-	if err = f.saveChannelOpeningState(completeChan.ChanID, fundingLockedSent, shortChanID); err != nil {
+	err = f.saveChannelOpeningState(completeChan.ChanID, fundingLockedSent,
+		shortChanID)
+	if err != nil {
 		fndgLog.Errorf("error setting channel state to fundingLockedSent: %v", err)
 		return
 	}
@@ -1070,8 +1077,8 @@ func (f *fundingManager) sendFundingLocked(completeChan *channeldb.OpenChannel,
 
 }
 
-func (f *fundingManager) sendChannelAnnouncement(completeChan *channeldb.OpenChannel, channel *lnwallet.LightningChannel,
-	shortChanID *lnwire.ShortChannelID) {
+func (f *fundingManager) sendChannelAnnouncement(completeChan *channeldb.OpenChannel,
+	channel *lnwallet.LightningChannel, shortChanID *lnwire.ShortChannelID) {
 
 	chanID := lnwire.NewChanIDFromOutPoint(completeChan.FundingOutpoint)
 	fundingPoint := *completeChan.FundingOutpoint
@@ -1300,8 +1307,8 @@ func (f *fundingManager) newChanAnnouncement(localPubKey, remotePubKey *btcec.Pu
 // the network to recognize the legitimacy of the channel. The crafted
 // announcements are then sent to the channel router to handle broadcasting to
 // the network during its next trickle.
-// This method is synchronous and will return when all the network requests finish,
-// either successfully or with an error.
+// This method is synchronous and will return when all the network requests
+// finish, either successfully or with an error.
 func (f *fundingManager) announceChannel(localIDKey, remoteIDKey, localFundingKey,
 	remoteFundingKey *btcec.PublicKey, shortChanID lnwire.ShortChannelID,
 	chanID lnwire.ChannelID, chanPoint *wire.OutPoint) error {
@@ -1313,6 +1320,10 @@ func (f *fundingManager) announceChannel(localIDKey, remoteIDKey, localFundingKe
 		return err
 	}
 
+	// The announcement message consists of three distinct messages:
+	// 1. channel announcement 2. channel update 3. channel proof
+	// We must wait for them all to be successfully announced to the network, and
+	// if either fails we consider the announcement unsuccessful.
 	var wg sync.WaitGroup
 	var announcementError error
 	sendAnnMsg := func(msg lnwire.Message) {
