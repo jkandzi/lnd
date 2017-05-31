@@ -594,3 +594,237 @@ func TestFundingManager_normalWorkflow(t *testing.T) {
 	}
 
 }
+
+// openChannel takes the funding process to the point where the funding
+// transaction is confirmed on-chain. Returns the funding outpoint.
+func openChannel(t *testing.T) *wire.OutPoint {
+	// Create a funding request and start the workflow
+	errChan := make(chan error, 1)
+	updateChan := make(chan *lnrpc.OpenStatusUpdate, 1)
+	initReq := &openChanReq{
+		targetPeerID:    int32(1),
+		targetPubkey:    bobPubKey,
+		localFundingAmt: 500000,
+		pushAmt:         0,
+		numConfs:        1,
+		updates:         updateChan,
+		err:             errChan,
+	}
+
+	aliceFundingMgr.initFundingWorkflow(bobAddr, initReq)
+
+	// Alice should have sent the init message to Bob
+	fundingReq := <-aliceMsgChan
+	if fundingReq.MsgType() != lnwire.MsgSingleFundingRequest {
+		t.Fatalf("expected MsgSingleFundingRequest to be sent from alice")
+	}
+
+	// Let Bob handle the init message
+	bobFundingMgr.processFundingRequest(fundingReq.(*lnwire.SingleFundingRequest), aliceAddr)
+
+	// and Bob should answer with a fundingResponse
+	fundingResponse := <-bobMsgChan
+	if fundingResponse.MsgType() != lnwire.MsgSingleFundingResponse {
+		t.Fatalf("expected MsgSingleFundingResponse to be sent from bob")
+	}
+
+	// forward response to Alice
+	aliceFundingMgr.processFundingResponse(fundingResponse.(*lnwire.SingleFundingResponse), bobAddr)
+
+	// Alice respond with a FundingComplete messages
+	fundingComplete := <-aliceMsgChan
+	if fundingComplete.MsgType() != lnwire.MsgSingleFundingComplete {
+		t.Fatalf("expected MsgSingleFundingComplete to be sent from alice")
+	}
+
+	// give it to Bob
+	bobFundingMgr.processFundingComplete(fundingComplete.(*lnwire.SingleFundingComplete), aliceAddr)
+
+	// Finally, Bob should send the SingleFundingSignComplete message
+	fundinSignComplete := <-bobMsgChan
+	if fundinSignComplete.MsgType() != lnwire.MsgSingleFundingSignComplete {
+		t.Fatalf("expected MsgSingleFundingSignComplete to be sent from bob")
+	}
+
+	// forward signature to Alice
+	aliceFundingMgr.processFundingSignComplete(fundinSignComplete.(*lnwire.SingleFundingSignComplete), bobAddr)
+
+	// Small sleep to make sure the transaction is broadcast
+	time.Sleep(100 * time.Millisecond)
+
+	// After Alice processes the singleFundingSignComplete message, she will
+	// broadcast the funding transaction to the network. This means that it
+	// should be part of the next block (in our test environment)
+	blockHashes, err := miningNode.Node.Generate(1)
+	if err != nil {
+		t.Fatalf("unable to generate block: %v", err)
+	}
+
+	block, err := miningNode.Node.GetBlock(blockHashes[0])
+	if err != nil {
+		t.Fatalf("unable to get block: %v", err)
+	}
+
+	// Block should contain coinbase tx + our funding tx
+	if len(block.Transactions) != 2 {
+		t.Fatalf("expected transaction to be part of block")
+	}
+
+	// TODO: Check that this transaction == the funding transaction
+	var fundingTxHash chainhash.Hash
+	for _, transaction := range block.Transactions {
+		fundingTxHash = transaction.TxHash()
+	}
+
+	fundingOutPoint := &wire.OutPoint{
+		Hash:  fundingTxHash,
+		Index: 0,
+	}
+	return fundingOutPoint
+}
+
+func TestFundingManager_restartBahavior(t *testing.T) {
+	setupFundingManagers(t)
+	defer tearDownFundingManagers()
+
+	fundingOutPoint := openChannel(t)
+
+	// Give fundingManager time to process the newly mined tx
+	time.Sleep(100 * time.Millisecond)
+
+	// The funding transaction was mined, so assert that both funding managers
+	// now have the state of this channel 'markedOpen' in their internal state
+	// machine.
+	state, _, err := aliceFundingMgr.getChannelOpeningState(fundingOutPoint)
+	if err != nil {
+		t.Fatalf("unable to get channel state: %v", err)
+	}
+
+	if state != markedOpen {
+		t.Fatalf("expected state to be markedOpen, was %v", state)
+	}
+	state, _, err = bobFundingMgr.getChannelOpeningState(fundingOutPoint)
+	if err != nil {
+		t.Fatalf("unable to get channel state: %v", err)
+	}
+
+	if state != markedOpen {
+		t.Fatalf("expected state to be markedOpen, was %v", state)
+	}
+
+	// at this point both Alice an Bob will attempt to send the fundingLocked
+	// message to the other peer. If the node fails before this message has been
+	// successfully sent,
+
+	// After the funding transaction is mined, Alice will send fundingLocked to Bob
+	fundingLockedAlice := <-aliceMsgChan
+	if fundingLockedAlice.MsgType() != lnwire.MsgFundingLocked {
+		t.Fatalf("expected fundingLocked sent from Alice")
+	}
+
+	// And similarly Bob will send funding locked to Alice
+	fundingLockedBob := <-bobMsgChan
+	if fundingLockedBob.MsgType() != lnwire.MsgFundingLocked {
+		t.Fatalf("expected fundingLocked sent from Bob")
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	// Check that the state machine is updated accordingly
+	state, _, err = aliceFundingMgr.getChannelOpeningState(fundingOutPoint)
+	if err != nil {
+		t.Fatalf("unable to get channel state: %v", err)
+	}
+
+	if state != fundingLockedSent {
+		t.Fatalf("expected state to be fundingLockedSent, was %v", state)
+	}
+	state, _, err = bobFundingMgr.getChannelOpeningState(fundingOutPoint)
+	if err != nil {
+		t.Fatalf("unable to get channel state: %v", err)
+	}
+
+	if state != fundingLockedSent {
+		t.Fatalf("expected state to be fundingLockedSent, was %v", state)
+	}
+
+	// After the FundingLocked message is sent, the channel will be announced.
+	// A chanAnnouncement consists of three distinct messages:
+	//	1) ChannelAnnouncement
+	//	2) ChannelUpdate
+	//	3) AnnounceSignatures
+	// that will be announced in no particular order.
+
+	announcements := make([]lnwire.Message, 3)
+	announcements[0] = <-aliceAnnounceChan
+	announcements[1] = <-aliceAnnounceChan
+	announcements[2] = <-aliceAnnounceChan
+
+	gotChannelAnnouncement := false
+	gotChannelUpdate := false
+	gotAnnounceSignatures := false
+
+	for _, msg := range announcements {
+		switch msg.(type) {
+		case *lnwire.ChannelAnnouncement:
+			gotChannelAnnouncement = true
+		case *lnwire.ChannelUpdate:
+			gotChannelUpdate = true
+		case *lnwire.AnnounceSignatures:
+			gotAnnounceSignatures = true
+		}
+	}
+
+	if !gotChannelAnnouncement {
+		t.Fatalf("did not get ChannelAnnouncement from Alice")
+	}
+	if !gotChannelUpdate {
+		t.Fatalf("did not get ChannelUpdate from Alice")
+	}
+	if !gotAnnounceSignatures {
+		t.Fatalf("did not get AnnounceSignatures from Alice")
+	}
+
+	// Do the check for Bob as well
+	announcements[0] = <-bobAnnounceChan
+	announcements[1] = <-bobAnnounceChan
+	announcements[2] = <-bobAnnounceChan
+
+	gotChannelAnnouncement = false
+	gotChannelUpdate = false
+	gotAnnounceSignatures = false
+
+	for _, msg := range announcements {
+		switch msg.(type) {
+		case *lnwire.ChannelAnnouncement:
+			gotChannelAnnouncement = true
+		case *lnwire.ChannelUpdate:
+			gotChannelUpdate = true
+		case *lnwire.AnnounceSignatures:
+			gotAnnounceSignatures = true
+		}
+	}
+
+	if !gotChannelAnnouncement {
+		t.Fatalf("did not get ChannelAnnouncement from Bob")
+	}
+	if !gotChannelUpdate {
+		t.Fatalf("did not get ChannelUpdate from Bob")
+	}
+	if !gotAnnounceSignatures {
+		t.Fatalf("did not get AnnounceSignatures from Bob")
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	// The internal state-machine should now have deleted them from the internal
+	// database, as the channel is announced.
+	state, _, err = aliceFundingMgr.getChannelOpeningState(fundingOutPoint)
+	if err != channeldb.ErrChannelNotFound {
+		t.Fatalf("expected to not find channel state, but got: %v", state)
+	}
+
+	state, _, err = bobFundingMgr.getChannelOpeningState(fundingOutPoint)
+	if err != channeldb.ErrChannelNotFound {
+		t.Fatalf("expected to not find channel state, but got: %v", state)
+	}
+
+}
