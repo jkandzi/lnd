@@ -304,22 +304,22 @@ func (f *fundingManager) Start() error {
 		doneChan := make(chan struct{})
 		timeoutChan := make(chan struct{})
 
-		go func() {
-			go f.waitForFundingWithTimeout(channel, channel.BroadcastHeight, doneChan, timeoutChan)
+		go func(ch *channeldb.OpenChannel) {
+			go f.waitForFundingWithTimeout(ch, ch.BroadcastHeight, doneChan, timeoutChan)
 
 			select {
 			case <-timeoutChan:
 				// forget the channel, delete it from the database
 				closeInfo := &channeldb.ChannelCloseSummary{
-					ChanPoint: *channel.FundingOutpoint,
-					RemotePub: channel.IdentityPub,
+					ChanPoint: *ch.FundingOutpoint,
+					RemotePub: ch.IdentityPub,
 					CloseType: channeldb.FundingCanceled,
 				}
-				channel.CloseChannel(closeInfo)
+				ch.CloseChannel(closeInfo)
 			case <-doneChan:
 				// success, funding transaction confirmed
 			}
-		}()
+		}(channel)
 	}
 
 	// Fetch all our open channels, and make sure they all finalized the opening
