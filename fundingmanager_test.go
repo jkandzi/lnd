@@ -884,3 +884,107 @@ func TestFundingManagerRestartBahavior(t *testing.T) {
 	}
 
 }
+
+func TestFundingManagerFundingTimeout(t *testing.T) {
+	setupFundingManagers(t)
+	defer tearDownFundingManagers()
+
+	// Run through the process of opening the channel, except sending the
+	// fundingSigned message to Alice. This let us simulate Bob never seeing the
+	// funding transaction being confirmed.
+	errChan := make(chan error, 1)
+	// We will consume the channel updates as we go, so no buffering is needed.
+	updateChan = make(chan *lnrpc.OpenStatusUpdate)
+	initReq := &openChanReq{
+		targetPeerID:    int32(1),
+		targetPubkey:    bobPubKey,
+		localFundingAmt: 500000,
+		pushAmt:         0,
+		numConfs:        1,
+		updates:         updateChan,
+		err:             errChan,
+	}
+
+	aliceFundingMgr.initFundingWorkflow(bobAddr, initReq)
+
+	// Alice should have sent the init message to Bob
+	fundingReq := <-aliceMsgChan
+	singleFundingReq, ok := fundingReq.(*lnwire.SingleFundingRequest)
+	if !ok {
+		t.Fatalf("expected SingleFundingRequest to be sent from alice")
+	}
+
+	// Let Bob handle the init message
+	bobFundingMgr.processFundingRequest(singleFundingReq, aliceAddr)
+
+	// and Bob should answer with a fundingResponse
+	fundingResponse := <-bobMsgChan
+	singleFundingResponse, ok := fundingResponse.(*lnwire.SingleFundingResponse)
+	if !ok {
+		t.Fatalf("expected SingleFundingResponse to be sent from bob")
+	}
+
+	// forward response to Alice
+	aliceFundingMgr.processFundingResponse(singleFundingResponse, bobAddr)
+
+	// Alice respond with a FundingComplete messages
+	fundingComplete := <-aliceMsgChan
+	singleFundingComplete, ok := fundingComplete.(*lnwire.SingleFundingComplete)
+	if !ok {
+		t.Fatalf("expected SingleFundingComplete to be sent from alice")
+	}
+
+	// give it to Bob
+	bobFundingMgr.processFundingComplete(singleFundingComplete, aliceAddr)
+
+	// Finally, Bob should send the SingleFundingSignComplete message
+	fundingSignComplete := <-bobMsgChan
+	_, ok = fundingSignComplete.(*lnwire.SingleFundingSignComplete)
+	if !ok {
+		t.Fatalf("expected SingleFundingSignComplete to be sent from bob")
+	}
+
+	// We don't forward this message to Alice, hence the funding transaction is
+	// never broadcasted. Bob wil at this point be waiting for the funding transaction to be
+	// confirmed, so the channel should be considered pending.
+	pendingChannels, err := bobFundingMgr.cfg.Wallet.ChannelDB.FetchPendingChannels()
+	if err != nil {
+		t.Fatalf("unable to fetch pending channels: %v", err)
+	}
+	if len(pendingChannels) != 1 {
+		t.Fatalf("Expected Bob to have 1 pending channel, had  %v", len(pendingChannels))
+	}
+
+	// We expect Bob to forget the channel after 288 blocks (48 hours), so mine
+	// 287, and check that it is still pending.
+	_, err = miningNode.Node.Generate(287)
+	if err != nil {
+		t.Fatalf("unable to generate block: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	// Bob should still be waiting for the channel to open.
+	pendingChannels, err = bobFundingMgr.cfg.Wallet.ChannelDB.FetchPendingChannels()
+	if err != nil {
+		t.Fatalf("unable to fetch pending channels: %v", err)
+	}
+	if len(pendingChannels) != 1 {
+		t.Fatalf("Expected Bob to have 1 pending channel, had  %v", len(pendingChannels))
+	}
+
+	// If we now generate one more block, Bob should forget about the channel,
+	_, err = miningNode.Node.Generate(1)
+	if err != nil {
+		t.Fatalf("unable to generate block: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	pendingChannels, err = bobFundingMgr.cfg.Wallet.ChannelDB.FetchPendingChannels()
+	if err != nil {
+		t.Fatalf("unable to fetch pending channels: %v", err)
+	}
+	if len(pendingChannels) != 0 {
+		t.Fatalf("Expected Bob to have 0 pending channel, had  %v", len(pendingChannels))
+	}
+
+}

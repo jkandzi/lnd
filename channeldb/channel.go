@@ -130,6 +130,10 @@ const (
 // to an on-disk log, which can then subsequently be queried in order to
 // "time-travel" to a prior state.
 type OpenChannel struct {
+	// BroadcastHeight is the approximate blockchain height the funding
+	// transaction was broadcasted.
+	BroadcastHeight uint32
+
 	// OpeningHeight is the height in which this channel was officially
 	// marked open.
 	OpeningHeight uint32
@@ -700,6 +704,12 @@ const (
 	// BreachClose indicates that one peer attempted to broadcast a prior
 	// _revoked_ channel state.
 	BreachClose
+
+	// FundingCanceled indicates that the channel never was fully opened before it
+	// was marked as closed in the database. This can happen if we or the remote
+	// fail at some point during the opening workflow, or we timeout waiting for
+	// the funding transaction to be confirmed.
+	FundingCanceled
 )
 
 // ChannelCloseSummary contains the final state of a channel at the point it

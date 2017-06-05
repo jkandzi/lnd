@@ -28,6 +28,10 @@ import (
 const (
 	// TODO(roasbeef): tune
 	msgBufferSize = 50
+
+	// Maximum number of blocks to wait for the funding transaction to be
+	// confirmed before forgetting about the channel. 288 blocks is ~48 hrs
+	maxWaitNumBlocksFundingConf = 288
 )
 
 // reservationWithCtx encapsulates a pending channel reservation. This wrapper
@@ -298,7 +302,24 @@ func (f *fundingManager) Start() error {
 		f.barrierMtx.Unlock()
 
 		doneChan := make(chan struct{})
-		go f.waitForFundingConfirmation(channel, doneChan)
+		timeoutChan := make(chan struct{})
+
+		go func() {
+			go f.waitForFundingWithTimeout(channel, channel.BroadcastHeight, doneChan, timeoutChan)
+
+			select {
+			case <-timeoutChan:
+				// forget the channel, delete it from the database
+				closeInfo := &channeldb.ChannelCloseSummary{
+					ChanPoint: *channel.FundingOutpoint,
+					RemotePub: channel.IdentityPub,
+					CloseType: channeldb.FundingCanceled,
+				}
+				channel.CloseChannel(closeInfo)
+			case <-doneChan:
+				// success, funding transaction confirmed
+			}
+		}()
 	}
 
 	// Fetch all our open channels, and make sure they all finalized the opening
@@ -820,16 +841,36 @@ func (f *fundingManager) handleFundingComplete(fmsg *fundingCompleteMsg) {
 	obsfucator := fmsg.msg.StateHintObsfucator
 	commitSig := fmsg.msg.CommitSignature.Serialize()
 
+	// Get the current block height.
+	_, bestHeight, err := f.cfg.ChainIO.GetBestBlock()
+	if err != nil {
+		fndgLog.Errorf("unable to get best height: %v", err)
+	}
+
 	// With all the necessary data available, attempt to advance the
 	// funding workflow to the next stage. If this succeeds then the
 	// funding transaction will broadcast after our next message.
+	// CompleteReservationSingle will also mark the channel as 'IsPending'
+	// in the database
 	completeChan, err := resCtx.reservation.CompleteReservationSingle(
-		revokeKey, &fundingOut, commitSig, obsfucator)
+		revokeKey, &fundingOut, uint32(bestHeight), commitSig, obsfucator)
 	if err != nil {
 		// TODO(roasbeef): better error logging: peerID, channelID, etc.
 		fndgLog.Errorf("unable to complete single reservation: %v", err)
 		cancelReservation()
 		return
+	}
+
+	// If something goes wrong before the funding transaction is confirmed, we
+	// use this convenience method to delete the pending OpenChannel from the
+	// database.
+	deleteFromDatabase := func() {
+		closeInfo := &channeldb.ChannelCloseSummary{
+			ChanPoint: *completeChan.FundingOutpoint,
+			RemotePub: completeChan.IdentityPub,
+			CloseType: channeldb.FundingCanceled,
+		}
+		completeChan.CloseChannel(closeInfo)
 	}
 
 	// With their signature for our version of the commitment transaction
@@ -841,6 +882,7 @@ func (f *fundingManager) handleFundingComplete(fmsg *fundingCompleteMsg) {
 	if err != nil {
 		fndgLog.Errorf("unable to parse signature: %v", err)
 		cancelReservation()
+		deleteFromDatabase()
 		return
 	}
 
@@ -861,15 +903,36 @@ func (f *fundingManager) handleFundingComplete(fmsg *fundingCompleteMsg) {
 	if err := f.cfg.SendToPeer(peerKey, signComplete); err != nil {
 		fndgLog.Errorf("unable to send signComplete message: %v", err)
 		cancelReservation()
+		deleteFromDatabase()
 		return
 	}
-
+	// When we get to this point we have sent the signComplete message to the
+	// channel funder, and BOLT#2 specifies that we MUST remember the channel for
+	// reconnection.
+	//
+	// We will now wait for the funder to broadcast the funding transaction, and
+	// for it to be confirmed on chain. The channel is already marked as pending
+	// in the database, so in case of a disconnect or restart, we will continue
+	// waiting for the confirmation the next time we start the funding manager.
+	// In case the funding transaction never appears on the blockchain, we must
+	// forget this channel. We therefore completely forget about this channel if
+	// we haven't seen the funding transaction in 288 blocks (~ 48 hrs), by
+	// canceling the reservation and canceling the wait for the funding
+	// confirmation.
 	go func() {
 		doneChan := make(chan struct{})
-		go f.waitForFundingConfirmation(completeChan, doneChan)
+		timeoutChan := make(chan struct{})
+		go f.waitForFundingWithTimeout(completeChan, uint32(bestHeight), doneChan, timeoutChan)
 
-		<-doneChan
-		f.deleteReservationCtx(peerKey, fmsg.msg.PendingChannelID)
+		select {
+		case <-timeoutChan:
+			// forget the channel
+			cancelReservation()
+			deleteFromDatabase()
+		case <-doneChan:
+			// success, funding transaction confirmed
+			f.deleteReservationCtx(peerKey, fmsg.msg.PendingChannelID)
+		}
 	}()
 }
 
@@ -930,7 +993,9 @@ func (f *fundingManager) handleFundingSignComplete(fmsg *fundingSignCompleteMsg)
 
 	go func() {
 		doneChan := make(chan struct{})
-		go f.waitForFundingConfirmation(completeChan, doneChan)
+		cancelChan := make(chan struct{})
+		go f.waitForFundingConfirmation(completeChan, uint32(bestHeight),
+			cancelChan, doneChan)
 
 		select {
 		case <-f.quit:
@@ -956,13 +1021,55 @@ func (f *fundingManager) handleFundingSignComplete(fmsg *fundingSignCompleteMsg)
 	}()
 }
 
+// waitForFundingWithTimeout is a wrapper around waitForFundingConfirmation that
+// will cancel the wait for confirmation if maxWaitNumBlocksFundingConf has
+// passed from bestHeight. In the case of timeout, the timeoutChan will be
+// closed. In case of confirmation, doneChan will be closed.
+func (f *fundingManager) waitForFundingWithTimeout(completeChan *channeldb.OpenChannel,
+	bestHeight uint32, doneChan chan<- struct{}, timeoutChan chan<- struct{}) {
+
+	epochClient, err := f.cfg.Notifier.RegisterBlockEpochNtfn()
+	if err != nil {
+		fndgLog.Errorf("unable to register for epoch notification: %v", err)
+		close(timeoutChan)
+		return
+	}
+
+	waitingDoneChan := make(chan struct{})
+	cancelChan := make(chan struct{})
+
+	go f.waitForFundingConfirmation(completeChan,
+		uint32(bestHeight), cancelChan, waitingDoneChan)
+
+	for {
+		select {
+		case epoch := <-epochClient.Epochs:
+			if uint32(epoch.Height) >= bestHeight+maxWaitNumBlocksFundingConf {
+				fndgLog.Warnf("waited for %v blocks without seeing funding "+
+					"transaction confirmed, cancelling.", maxWaitNumBlocksFundingConf)
+
+				// cancel waitForFundingConfirmation
+				close(cancelChan)
+
+				// and notify caller of the timeout
+				close(timeoutChan)
+				return
+			}
+		case <-waitingDoneChan:
+			close(doneChan)
+			return
+		}
+	}
+}
+
 // waitForFundingConfirmation handles the final stages of the channel funding
 // process once the funding transaction has been broadcast. The primary
 // function of waitForFundingConfirmation is to wait for blockchain
 // confirmation, and then to notify the other systems that must be notified
 // when a channel has become active for lightning transactions.
+// The wait can be canceled by closing the cancelChan.
 func (f *fundingManager) waitForFundingConfirmation(completeChan *channeldb.OpenChannel,
-	doneChan chan struct{}) {
+	bestHeight uint32, cancelChan <-chan struct{}, doneChan chan<- struct{}) {
 
 	defer close(doneChan)
 
@@ -981,9 +1088,24 @@ func (f *fundingManager) waitForFundingConfirmation(completeChan *channeldb.Open
 	fndgLog.Infof("Waiting for funding tx (%v) to reach %v confirmations",
 		txid, numConfs)
 
+	var confDetails *chainntnfs.TxConfirmation
+	var ok bool
+
 	// Wait until the specified number of confirmations has been reached,
-	// or the wallet signals a shutdown.
-	confDetails, ok := <-confNtfn.Confirmed
+	// we get a cancel signal, or the wallet signals a shutdown.
+	select {
+	case confDetails, ok = <-confNtfn.Confirmed:
+		// fallthrough
+	case <-cancelChan:
+		fndgLog.Warnf("canceled waiting for funding confirmation, stopping "+
+			"funding flow for ChannelPoint(%v)", completeChan.FundingOutpoint)
+		return
+	case <-f.quit:
+		fndgLog.Warnf("fundingManager shutting down, stopping "+
+			"funding flow for ChannelPoint(%v)", completeChan.FundingOutpoint)
+		return
+	}
+
 	if !ok {
 		fndgLog.Warnf("ChainNotifier shutting down, cannot complete "+
 			"funding flow for ChannelPoint(%v)",
