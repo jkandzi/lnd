@@ -319,11 +319,11 @@ func (f *fundingManager) Start() error {
 		}
 
 		fndgLog.Debugf("channel with opening state %v found", channelState)
-		chanID := lnwire.NewChanIDFromOutPoint(channel.FundingOutpoint)
 
-		lnChannel, err := f.cfg.FindChannel(chanID)
+		lnChannel, err := lnwallet.NewLightningChannel(f.cfg.Wallet.Signer,
+			f.cfg.Notifier, f.cfg.FeeEstimator, channel)
 		if err != nil {
-			fndgLog.Errorf("error finding lightning channel: %v", err)
+			fndgLog.Errorf("error creating lightning channel: %v", err)
 			return err
 		}
 
@@ -335,7 +335,7 @@ func (f *fundingManager) Start() error {
 		case markedOpen:
 			// The funding transaction was confirmed, but we did not successfully
 			// send the fundingLocked message to the peer, so let's do that now.
-			go f.sendFundingLocked(channel, shortChanID)
+			go f.sendFundingLockedAndAnnounceChannel(channel, shortChanID)
 
 		case fundingLockedSent:
 			// fundingLocked was sent to peer, but the channel announcement was not
@@ -1029,11 +1029,14 @@ func (f *fundingManager) waitForFundingConfirmation(completeChan *channeldb.Open
 
 	// Now that the funding transaction has the required number of confirmations,
 	// we send the fundingLocked message to the peer.
-	f.sendFundingLocked(completeChan, &shortChanID)
+	f.sendFundingLockedAndAnnounceChannel(completeChan, &shortChanID)
 }
 
-func (f *fundingManager) sendFundingLocked(completeChan *channeldb.OpenChannel,
-	shortChanID *lnwire.ShortChannelID) {
+// sendFundingLockedAndAnnounceChannel creates and sends the fundingLocked
+// message, and then the channel announcement. This should be called after the
+// funding transaction has been confirmed, and the channelState is 'markedOpen'.
+func (f *fundingManager) sendFundingLockedAndAnnounceChannel(
+	completeChan *channeldb.OpenChannel, shortChanID *lnwire.ShortChannelID) {
 
 	chanID := lnwire.NewChanIDFromOutPoint(completeChan.FundingOutpoint)
 
@@ -1077,6 +1080,10 @@ func (f *fundingManager) sendFundingLocked(completeChan *channeldb.OpenChannel,
 	f.sendChannelAnnouncement(completeChan, channel, shortChanID)
 }
 
+// sendChannelAnnouncement broadcast the neccessary channel announcement
+// messages to the network. Should be called after the fundingLocked message is
+// sent (channelState is 'fundingLockedSent') and the channel is ready to be
+// used.
 func (f *fundingManager) sendChannelAnnouncement(completeChan *channeldb.OpenChannel,
 	channel *lnwallet.LightningChannel, shortChanID *lnwire.ShortChannelID) {
 
