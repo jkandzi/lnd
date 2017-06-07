@@ -257,7 +257,7 @@ func createTestWalletController(t *testing.T, tempTestDir string, hdSeed []byte,
 		walletType := walletDriver.WalletType
 		switch walletType {
 		case "btcwallet":
-			chainRpc, err := chain.NewRPCClient(netParams,
+			chainRPC, err := chain.NewRPCClient(netParams,
 				rpcConfig.Host, rpcConfig.User, rpcConfig.Pass,
 				rpcConfig.Certificates, false, 20)
 			if err != nil {
