@@ -1446,32 +1446,19 @@ func (f *fundingManager) announceChannel(localIDKey, remoteIDKey, localFundingKe
 	// 1. channel announcement 2. channel update 3. channel proof
 	// We must wait for them all to be successfully announced to the network, and
 	// if either fails we consider the announcement unsuccessful.
-	var wg sync.WaitGroup
-	announcementErrors := make(chan error, 3)
-	sendAnnMsg := func(msg lnwire.Message) {
-		defer wg.Done()
-		err := f.cfg.SendAnnouncement(msg)
-		// keep the errors
-		if err != nil {
-			announcementErrors <- err
-		}
-	}
-
-	wg.Add(3)
-	go sendAnnMsg(ann.chanAnn)
-	go sendAnnMsg(ann.chanUpdateAnn)
-	go sendAnnMsg(ann.chanProof)
-	wg.Wait()
-
-	// if we get an error from the error channel, we use the first one as the
-	// return error
-	select {
-	case err = <-announcementErrors:
+	err = f.cfg.SendAnnouncement(ann.chanAnn)
+	if err != nil {
 		return err
-	default:
-		// Everything okay
-		return nil
 	}
+	err = f.cfg.SendAnnouncement(ann.chanUpdateAnn)
+	if err != nil {
+		return err
+	}
+	err = f.cfg.SendAnnouncement(ann.chanProof)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // initFundingWorkflow sends a message to the funding manager instructing it
