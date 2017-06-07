@@ -19,6 +19,7 @@ import (
 	"github.com/roasbeef/btcd/chaincfg"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcrpcclient"
+	"github.com/roasbeef/btcwallet/chain"
 	_ "github.com/roasbeef/btcwallet/walletdb/bdb"
 
 	"github.com/roasbeef/btcd/btcec"
@@ -256,11 +257,18 @@ func createTestWalletController(t *testing.T, tempTestDir string, hdSeed []byte,
 		walletType := walletDriver.WalletType
 		switch walletType {
 		case "btcwallet":
+			chainRpc, err := chain.NewRPCClient(netParams,
+				rpcConfig.Host, rpcConfig.User, rpcConfig.Pass,
+				rpcConfig.Certificates, false, 20)
+			if err != nil {
+				t.Fatalf("unable to make chain rpc: %v", err)
+			}
 			btcwalletConfig := &btcwallet.Config{
 				PrivatePass: privPass,
 				HdSeed:      hdSeed[:],
 				DataDir:     tempTestDir,
 				NetParams:   netParams,
+				ChainSource: chainRpc,
 			}
 			wcc, err := walletDriver.New(btcwalletConfig)
 			if err != nil {
