@@ -210,10 +210,6 @@ type addSingleFunderSigsMsg struct {
 	// transaction as assembled by the workflow initiator.
 	fundingOutpoint *wire.OutPoint
 
-	// fundingBroadcastHeight is an approximate block height for when the funding
-	// transaction of this single-funder workflow was broadcast.
-	fundingBroadcastHeight uint32
-
 	// revokeKey is the revocation public key derived by the remote node to
 	// be used within the initial version of the commitment transaction we
 	// construct for them.
@@ -1130,7 +1126,6 @@ func (l *LightningWallet) handleSingleFunderSigs(req *addSingleFunderSigsMsg) {
 	defer pendingReservation.Unlock()
 
 	pendingReservation.partialState.FundingOutpoint = req.fundingOutpoint
-	pendingReservation.partialState.BroadcastHeight = req.fundingBroadcastHeight
 	pendingReservation.partialState.TheirCurrentRevocation = req.revokeKey
 	pendingReservation.partialState.ChanID = req.fundingOutpoint
 	pendingReservation.partialState.StateHintObsfucator = req.obsfucator

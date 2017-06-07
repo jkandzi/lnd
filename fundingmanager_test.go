@@ -214,7 +214,6 @@ func createTestFundingManager(t *testing.T, pubKey *btcec.PublicKey,
 	f, err = newFundingManager(fundingConfig{
 		IDKey:        pubKey,
 		Wallet:       lnw,
-		ChainIO:      bio,
 		Notifier:     chainNotifier,
 		FeeEstimator: estimator,
 		SignMessage: func(pubKey *btcec.PublicKey, msg []byte) (*btcec.Signature, error) {
@@ -262,10 +261,6 @@ func createTestWalletController(t *testing.T, tempTestDir string, hdSeed []byte,
 				HdSeed:      hdSeed[:],
 				DataDir:     tempTestDir,
 				NetParams:   netParams,
-				RPCHost:     rpcConfig.Host,
-				RPCUser:     rpcConfig.User,
-				RPCPass:     rpcConfig.Pass,
-				CACert:      rpcConfig.Certificates,
 			}
 			wcc, err := walletDriver.New(btcwalletConfig)
 			if err != nil {
@@ -308,7 +303,6 @@ func recreateAliceFundingManager(t *testing.T) {
 	f, err := newFundingManager(fundingConfig{
 		IDKey:        oldCfg.IDKey,
 		Wallet:       oldCfg.Wallet,
-		ChainIO:      oldCfg.ChainIO,
 		Notifier:     oldCfg.Notifier,
 		FeeEstimator: oldCfg.FeeEstimator,
 		SignMessage: func(pubKey *btcec.PublicKey, msg []byte) (*btcec.Signature, error) {

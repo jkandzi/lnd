@@ -841,19 +841,13 @@ func (f *fundingManager) handleFundingComplete(fmsg *fundingCompleteMsg) {
 	obsfucator := fmsg.msg.StateHintObsfucator
 	commitSig := fmsg.msg.CommitSignature.Serialize()
 
-	// Get the current block height.
-	_, bestHeight, err := f.cfg.ChainIO.GetBestBlock()
-	if err != nil {
-		fndgLog.Errorf("unable to get best height: %v", err)
-	}
-
 	// With all the necessary data available, attempt to advance the
 	// funding workflow to the next stage. If this succeeds then the
 	// funding transaction will broadcast after our next message.
 	// CompleteReservationSingle will also mark the channel as 'IsPending'
 	// in the database
 	completeChan, err := resCtx.reservation.CompleteReservationSingle(
-		revokeKey, &fundingOut, uint32(bestHeight), commitSig, obsfucator)
+		revokeKey, &fundingOut, commitSig, obsfucator)
 	if err != nil {
 		// TODO(roasbeef): better error logging: peerID, channelID, etc.
 		fndgLog.Errorf("unable to complete single reservation: %v", err)
@@ -1026,7 +1020,7 @@ func (f *fundingManager) handleFundingSignComplete(fmsg *fundingSignCompleteMsg)
 // passed from bestHeight. In the case of timeout, the timeoutChan will be
 // closed. In case of confirmation, doneChan will be closed.
 func (f *fundingManager) waitForFundingWithTimeout(completeChan *channeldb.OpenChannel,
-	bestHeight uint32, doneChan chan<- struct{}, timeoutChan chan<- struct{}) {
+	doneChan chan<- struct{}, timeoutChan chan<- struct{}) {
 
 	epochClient, err := f.cfg.Notifier.RegisterBlockEpochNtfn()
 	if err != nil {

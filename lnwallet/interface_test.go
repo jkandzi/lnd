@@ -896,17 +896,10 @@ func testSingleFunderReservationWorkflowResponder(miner *rpctest.Harness,
 		t.Fatalf("unable to sign alice's commit tx: %v", err)
 	}
 
-	// Get the current block height.
-
-	_, bestHeight, err := wallet.ChainIO.GetBestBlock()
-	if err != nil {
-		t.Fatalf("unable to get best height: %v", err)
-	}
-
 	// With this stage complete, Alice can now complete the reservation.
 	bobRevokeKey := bobContribution.RevocationKey
 	_, err = chanReservation.CompleteReservationSingle(bobRevokeKey,
-		fundingOutpoint, uint32(bestHeight), bobCommitSig, bobObsfucator)
+		fundingOutpoint, bobCommitSig, bobObsfucator)
 	if err != nil {
 		t.Fatalf("unable to complete reservation: %v", err)
 	}

@@ -340,21 +340,20 @@ func (r *ChannelReservation) CompleteReservation(fundingInputScripts []*InputScr
 // response to a single funder channel, only a commitment signature will be
 // populated.
 func (r *ChannelReservation) CompleteReservationSingle(
-	revocationKey *btcec.PublicKey, fundingPoint *wire.OutPoint, fundingBroadcastHeight uint32,
-	commitSig []byte, obsfucator [StateHintSize]byte) (*channeldb.OpenChannel, error) {
+	revocationKey *btcec.PublicKey, fundingPoint *wire.OutPoint, commitSig []byte,
+	obsfucator [StateHintSize]byte) (*channeldb.OpenChannel, error) {
 
 	errChan := make(chan error, 1)
 	completeChan := make(chan *channeldb.OpenChannel, 1)
 
 	r.wallet.msgChan <- &addSingleFunderSigsMsg{
-		pendingFundingID:       r.reservationID,
-		revokeKey:              revocationKey,
-		fundingOutpoint:        fundingPoint,
-		fundingBroadcastHeight: fundingBroadcastHeight,
-		theirCommitmentSig:     commitSig,
-		obsfucator:             obsfucator,
-		completeChan:           completeChan,
-		err:                    errChan,
+		pendingFundingID:   r.reservationID,
+		revokeKey:          revocationKey,
+		fundingOutpoint:    fundingPoint,
+		theirCommitmentSig: commitSig,
+		obsfucator:         obsfucator,
+		completeChan:       completeChan,
+		err:                errChan,
 	}
 
 	return <-completeChan, <-errChan
