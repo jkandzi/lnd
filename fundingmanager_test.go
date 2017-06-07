@@ -446,7 +446,8 @@ func openChannel(t *testing.T) {
 	fundingReq := <-aliceMsgChan
 	singleFundingReq, ok := fundingReq.(*lnwire.SingleFundingRequest)
 	if !ok {
-		t.Fatalf("expected SingleFundingRequest to be sent from alice")
+		t.Fatalf("expected SingleFundingRequest to be sent from alice, "+
+			"instead got %T", fundingReq)
 	}
 
 	// Let Bob handle the init message
@@ -456,7 +457,8 @@ func openChannel(t *testing.T) {
 	fundingResponse := <-bobMsgChan
 	singleFundingResponse, ok := fundingResponse.(*lnwire.SingleFundingResponse)
 	if !ok {
-		t.Fatalf("expected SingleFundingResponse to be sent from bob")
+		t.Fatalf("expected SingleFundingResponse to be sent from bob, "+
+			"instead got %T", fundingResponse)
 	}
 
 	// forward response to Alice
@@ -466,7 +468,8 @@ func openChannel(t *testing.T) {
 	fundingComplete := <-aliceMsgChan
 	singleFundingComplete, ok := fundingComplete.(*lnwire.SingleFundingComplete)
 	if !ok {
-		t.Fatalf("expected SingleFundingComplete to be sent from alice")
+		t.Fatalf("expected SingleFundingComplete to be sent from alice, "+
+			"instead got %T", fundingComplete)
 	}
 
 	// give it to Bob
@@ -477,7 +480,8 @@ func openChannel(t *testing.T) {
 	singleFundingSignComplete, ok :=
 		fundingSignComplete.(*lnwire.SingleFundingSignComplete)
 	if !ok {
-		t.Fatalf("expected SingleFundingSignComplete to be sent from bob")
+		t.Fatalf("expected SingleFundingSignComplete to be sent from bob, "+
+			"instead got %T", fundingSignComplete)
 	}
 
 	// forward signature to Alice
@@ -563,13 +567,15 @@ func TestFundingManagerNormalWorkflow(t *testing.T) {
 	// After the funding transaction is mined, Alice will send fundingLocked to Bob
 	fundingLockedAlice := <-aliceMsgChan
 	if fundingLockedAlice.MsgType() != lnwire.MsgFundingLocked {
-		t.Fatalf("expected fundingLocked sent from Alice")
+		t.Fatalf("expected fundingLocked sent from Alice, "+
+			"instead got %T", fundingLockedAlice)
 	}
 
 	// And similarly Bob will send funding locked to Alice
 	fundingLockedBob := <-bobMsgChan
 	if fundingLockedBob.MsgType() != lnwire.MsgFundingLocked {
-		t.Fatalf("expected fundingLocked sent from Bob")
+		t.Fatalf("expected fundingLocked sent from Bob, "+
+			"instead got %T", fundingLockedBob)
 	}
 
 	// Sleep to make sure database write is finished.
@@ -675,6 +681,9 @@ func TestFundingManagerNormalWorkflow(t *testing.T) {
 		t.Fatalf("expected to not find channel state, but got: %v", state)
 	}
 
+	// Need to give bob time to update database.
+	time.Sleep(100 * time.Millisecond)
+
 	state, _, err = bobFundingMgr.getChannelOpeningState(fundingOutPoint)
 	if err != channeldb.ErrChannelNotFound {
 		t.Fatalf("expected to not find channel state, but got: %v", state)
@@ -742,7 +751,8 @@ func TestFundingManagerRestartBahavior(t *testing.T) {
 	// Bob will send funding locked to Alice
 	fundingLockedBob := <-bobMsgChan
 	if fundingLockedBob.MsgType() != lnwire.MsgFundingLocked {
-		t.Fatalf("expected fundingLocked sent from Bob")
+		t.Fatalf("expected fundingLocked sent from Bob, "+
+			"instead got %T", fundingLockedBob)
 	}
 
 	// Sleep to make sure database write is finished.
@@ -780,7 +790,8 @@ func TestFundingManagerRestartBahavior(t *testing.T) {
 
 	fundingLockedAlice := <-aliceMsgChan
 	if fundingLockedAlice.MsgType() != lnwire.MsgFundingLocked {
-		t.Fatalf("expected fundingLocked sent from Alice")
+		t.Fatalf("expected fundingLocked sent from Alice, "+
+			"instead got %T", fundingLockedAlice)
 	}
 
 	// Sleep to make sure database write is finished.
@@ -913,7 +924,8 @@ func TestFundingManagerFundingTimeout(t *testing.T) {
 	fundingReq := <-aliceMsgChan
 	singleFundingReq, ok := fundingReq.(*lnwire.SingleFundingRequest)
 	if !ok {
-		t.Fatalf("expected SingleFundingRequest to be sent from alice")
+		t.Fatalf("expected SingleFundingRequest to be sent from alice, "+
+			"instead got %T", fundingReq)
 	}
 
 	// Let Bob handle the init message
@@ -923,7 +935,8 @@ func TestFundingManagerFundingTimeout(t *testing.T) {
 	fundingResponse := <-bobMsgChan
 	singleFundingResponse, ok := fundingResponse.(*lnwire.SingleFundingResponse)
 	if !ok {
-		t.Fatalf("expected SingleFundingResponse to be sent from bob")
+		t.Fatalf("expected SingleFundingResponse to be sent from bob, "+
+			"instead got %T", fundingResponse)
 	}
 
 	// forward response to Alice
@@ -933,7 +946,8 @@ func TestFundingManagerFundingTimeout(t *testing.T) {
 	fundingComplete := <-aliceMsgChan
 	singleFundingComplete, ok := fundingComplete.(*lnwire.SingleFundingComplete)
 	if !ok {
-		t.Fatalf("expected SingleFundingComplete to be sent from alice")
+		t.Fatalf("expected SingleFundingComplete to be sent from alice, "+
+			"instead got %T", fundingComplete)
 	}
 
 	// give it to Bob
@@ -943,7 +957,8 @@ func TestFundingManagerFundingTimeout(t *testing.T) {
 	fundingSignComplete := <-bobMsgChan
 	_, ok = fundingSignComplete.(*lnwire.SingleFundingSignComplete)
 	if !ok {
-		t.Fatalf("expected SingleFundingSignComplete to be sent from bob")
+		t.Fatalf("expected SingleFundingSignComplete to be sent from bob, "+
+			"instead got %T", fundingSignComplete)
 	}
 
 	// We don't forward this message to Alice, hence the funding transaction is
