@@ -268,7 +268,7 @@ func createTestWalletController(t *testing.T, tempTestDir string, hdSeed []byte,
 				HdSeed:      hdSeed[:],
 				DataDir:     tempTestDir,
 				NetParams:   netParams,
-				ChainSource: chainRpc,
+				ChainSource: chainRPC,
 			}
 			wcc, err := walletDriver.New(btcwalletConfig)
 			if err != nil {
