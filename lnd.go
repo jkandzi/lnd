@@ -130,9 +130,9 @@ func lndMain() error {
 			)
 		},
 		SendAnnouncement: func(msg lnwire.Message) error {
-			server.discoverSrv.ProcessLocalAnnouncement(msg,
+			errChan := server.discoverSrv.ProcessLocalAnnouncement(msg,
 				idPrivKey.PubKey())
-			return nil
+			return <-errChan
 		},
 		ArbiterChan:    server.breachArbiter.newContracts,
 		SendToPeer:     server.sendToPeer,
