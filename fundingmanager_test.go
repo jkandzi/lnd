@@ -447,6 +447,11 @@ func openChannel(t *testing.T) {
 	fundingReq := <-aliceMsgChan
 	singleFundingReq, ok := fundingReq.(*lnwire.SingleFundingRequest)
 	if !ok {
+		errorMsg, gotError := fundingReq.(*lnwire.Error)
+		if gotError {
+			t.Fatalf("expected SingleFundingRequest to be sent from bob, "+
+				"instead got error: (%v) %v", errorMsg.Code, string(errorMsg.Data))
+		}
 		t.Fatalf("expected SingleFundingRequest to be sent from alice, "+
 			"instead got %T", fundingReq)
 	}
@@ -458,6 +463,11 @@ func openChannel(t *testing.T) {
 	fundingResponse := <-bobMsgChan
 	singleFundingResponse, ok := fundingResponse.(*lnwire.SingleFundingResponse)
 	if !ok {
+		errorMsg, gotError := fundingResponse.(*lnwire.Error)
+		if gotError {
+			t.Fatalf("expected SingleFundingResponse to be sent from bob, "+
+				"instead got error: (%v) %v", errorMsg.Code, string(errorMsg.Data))
+		}
 		t.Fatalf("expected SingleFundingResponse to be sent from bob, "+
 			"instead got %T", fundingResponse)
 	}
@@ -469,6 +479,11 @@ func openChannel(t *testing.T) {
 	fundingComplete := <-aliceMsgChan
 	singleFundingComplete, ok := fundingComplete.(*lnwire.SingleFundingComplete)
 	if !ok {
+		errorMsg, gotError := fundingComplete.(*lnwire.Error)
+		if gotError {
+			t.Fatalf("expected SingleFundingComplete to be sent from bob, "+
+				"instead got error: (%v) %v", errorMsg.Code, string(errorMsg.Data))
+		}
 		t.Fatalf("expected SingleFundingComplete to be sent from alice, "+
 			"instead got %T", fundingComplete)
 	}
@@ -481,6 +496,11 @@ func openChannel(t *testing.T) {
 	singleFundingSignComplete, ok :=
 		fundingSignComplete.(*lnwire.SingleFundingSignComplete)
 	if !ok {
+		errorMsg, gotError := fundingSignComplete.(*lnwire.Error)
+		if gotError {
+			t.Fatalf("expected SingleFundingSignComplete to be sent from bob, "+
+				"instead got error: (%v) %v", errorMsg.Code, string(errorMsg.Data))
+		}
 		t.Fatalf("expected SingleFundingSignComplete to be sent from bob, "+
 			"instead got %T", fundingSignComplete)
 	}
@@ -925,6 +945,11 @@ func TestFundingManagerFundingTimeout(t *testing.T) {
 	fundingReq := <-aliceMsgChan
 	singleFundingReq, ok := fundingReq.(*lnwire.SingleFundingRequest)
 	if !ok {
+		errorMsg, gotError := fundingReq.(*lnwire.Error)
+		if gotError {
+			t.Fatalf("expected SingleFundingRequest to be sent from bob, "+
+				"instead got error: (%v) %v", errorMsg.Code, string(errorMsg.Data))
+		}
 		t.Fatalf("expected SingleFundingRequest to be sent from alice, "+
 			"instead got %T", fundingReq)
 	}
@@ -936,6 +961,11 @@ func TestFundingManagerFundingTimeout(t *testing.T) {
 	fundingResponse := <-bobMsgChan
 	singleFundingResponse, ok := fundingResponse.(*lnwire.SingleFundingResponse)
 	if !ok {
+		errorMsg, gotError := fundingResponse.(*lnwire.Error)
+		if gotError {
+			t.Fatalf("expected SingleFundingResponse to be sent from bob, "+
+				"instead got error: (%v) %v", errorMsg.Code, string(errorMsg.Data))
+		}
 		t.Fatalf("expected SingleFundingResponse to be sent from bob, "+
 			"instead got %T", fundingResponse)
 	}
@@ -958,6 +988,11 @@ func TestFundingManagerFundingTimeout(t *testing.T) {
 	fundingSignComplete := <-bobMsgChan
 	_, ok = fundingSignComplete.(*lnwire.SingleFundingSignComplete)
 	if !ok {
+		errorMsg, gotError := fundingSignComplete.(*lnwire.Error)
+		if gotError {
+			t.Fatalf("expected SingleFundingSignComplete to be sent from bob, "+
+				"instead got error: (%v) %v", errorMsg.Code, string(errorMsg.Data))
+		}
 		t.Fatalf("expected SingleFundingSignComplete to be sent from bob, "+
 			"instead got %T", fundingSignComplete)
 	}
