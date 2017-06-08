@@ -264,11 +264,12 @@ func createTestWalletController(t *testing.T, tempTestDir string, hdSeed []byte,
 				t.Fatalf("unable to make chain rpc: %v", err)
 			}
 			btcwalletConfig := &btcwallet.Config{
-				PrivatePass: privPass,
-				HdSeed:      hdSeed[:],
-				DataDir:     tempTestDir,
-				NetParams:   netParams,
-				ChainSource: chainRPC,
+				PrivatePass:  privPass,
+				HdSeed:       hdSeed[:],
+				DataDir:      tempTestDir,
+				NetParams:    netParams,
+				ChainSource:  chainRPC,
+				FeeEstimator: lnwallet.StaticFeeEstimator{FeeRate: 250},
 			}
 			wcc, err := walletDriver.New(btcwalletConfig)
 			if err != nil {
