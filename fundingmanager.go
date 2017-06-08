@@ -316,6 +316,8 @@ func (f *fundingManager) Start() error {
 					CloseType: channeldb.FundingCanceled,
 				}
 				ch.CloseChannel(closeInfo)
+			case <-f.quit:
+				// shutting down, will resume wait on startup
 			case <-doneChan:
 				// success, funding transaction confirmed
 			}
@@ -920,9 +922,11 @@ func (f *fundingManager) handleFundingComplete(fmsg *fundingCompleteMsg) {
 
 		select {
 		case <-timeoutChan:
-			// forget the channel
+			// did not see funding confirmation before timeout, forget the channel
 			cancelReservation()
 			deleteFromDatabase()
+		case <-f.quit:
+			// shutting down, will resume wait on startup
 		case <-doneChan:
 			// success, funding transaction confirmed
 			f.deleteReservationCtx(peerKey, fmsg.msg.PendingChannelID)
@@ -1018,14 +1022,14 @@ func (f *fundingManager) handleFundingSignComplete(fmsg *fundingSignCompleteMsg)
 // waitForFundingWithTimeout is a wrapper around waitForFundingConfirmation that
 // will cancel the wait for confirmation if maxWaitNumBlocksFundingConf has
 // passed from bestHeight. In the case of timeout, the timeoutChan will be
-// closed. In case of confirmation, doneChan will be closed.
+// closed. In case of confirmation or error, doneChan will be closed.
 func (f *fundingManager) waitForFundingWithTimeout(completeChan *channeldb.OpenChannel,
 	doneChan chan<- struct{}, timeoutChan chan<- struct{}) {
 
 	epochClient, err := f.cfg.Notifier.RegisterBlockEpochNtfn()
 	if err != nil {
 		fndgLog.Errorf("unable to register for epoch notification: %v", err)
-		close(timeoutChan)
+		close(doneChan)
 		return
 	}
 
@@ -1049,6 +1053,8 @@ func (f *fundingManager) waitForFundingWithTimeout(completeChan *channeldb.OpenC
 				close(timeoutChan)
 				return
 			}
+		case <-f.quit:
+			// shutting down, will resume wait on startup
 		case <-waitingDoneChan:
 			close(doneChan)
 			return

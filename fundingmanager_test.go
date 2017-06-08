@@ -994,7 +994,10 @@ func TestFundingManagerFundingTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to generate block: %v", err)
 	}
-	time.Sleep(100 * time.Millisecond)
+
+	// It takes some time for the block to propagate to Bob and for Bob to update
+	// the database, so sleep for some time.
+	time.Sleep(500 * time.Millisecond)
 
 	pendingChannels, err = bobFundingMgr.cfg.Wallet.ChannelDB.FetchPendingChannels()
 	if err != nil {
