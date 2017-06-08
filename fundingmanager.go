@@ -1041,8 +1041,13 @@ func (f *fundingManager) waitForFundingWithTimeout(completeChan *channeldb.OpenC
 
 	for {
 		select {
-		case epoch := <-epochClient.Epochs:
-			if uint32(epoch.Height) >= bestHeight+maxWaitNumBlocksFundingConf {
+		case epoch, ok := <-epochClient.Epochs:
+			if !ok {
+				fndgLog.Warnf("Epoch client shutting down")
+				return
+			}
+
+			if uint32(epoch.Height) >= maxHeight {
 				fndgLog.Warnf("waited for %v blocks without seeing funding "+
 					"transaction confirmed, cancelling.", maxWaitNumBlocksFundingConf)
 
@@ -1055,6 +1060,7 @@ func (f *fundingManager) waitForFundingWithTimeout(completeChan *channeldb.OpenC
 			}
 		case <-f.quit:
 			// shutting down, will resume wait on startup
+			return
 		case <-waitingDoneChan:
 			close(doneChan)
 			return
