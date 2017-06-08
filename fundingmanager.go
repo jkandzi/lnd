@@ -305,7 +305,7 @@ func (f *fundingManager) Start() error {
 		timeoutChan := make(chan struct{})
 
 		go func(ch *channeldb.OpenChannel) {
-			go f.waitForFundingWithTimeout(ch, ch.BroadcastHeight, doneChan, timeoutChan)
+			go f.waitForFundingWithTimeout(ch, doneChan, timeoutChan)
 
 			select {
 			case <-timeoutChan:
@@ -902,6 +902,7 @@ func (f *fundingManager) handleFundingComplete(fmsg *fundingCompleteMsg) {
 		deleteFromDatabase()
 		return
 	}
+
 	// When we get to this point we have sent the signComplete message to the
 	// channel funder, and BOLT#2 specifies that we MUST remember the channel for
 	// reconnection.
@@ -918,7 +919,7 @@ func (f *fundingManager) handleFundingComplete(fmsg *fundingCompleteMsg) {
 	go func() {
 		doneChan := make(chan struct{})
 		timeoutChan := make(chan struct{})
-		go f.waitForFundingWithTimeout(completeChan, uint32(bestHeight), doneChan, timeoutChan)
+		go f.waitForFundingWithTimeout(completeChan, doneChan, timeoutChan)
 
 		select {
 		case <-timeoutChan:
@@ -992,8 +993,7 @@ func (f *fundingManager) handleFundingSignComplete(fmsg *fundingSignCompleteMsg)
 	go func() {
 		doneChan := make(chan struct{})
 		cancelChan := make(chan struct{})
-		go f.waitForFundingConfirmation(completeChan, uint32(bestHeight),
-			cancelChan, doneChan)
+		go f.waitForFundingConfirmation(completeChan, cancelChan, doneChan)
 
 		select {
 		case <-f.quit:
@@ -1036,9 +1036,10 @@ func (f *fundingManager) waitForFundingWithTimeout(completeChan *channeldb.OpenC
 	waitingDoneChan := make(chan struct{})
 	cancelChan := make(chan struct{})
 
-	go f.waitForFundingConfirmation(completeChan,
-		uint32(bestHeight), cancelChan, waitingDoneChan)
+	go f.waitForFundingConfirmation(completeChan, cancelChan, waitingDoneChan)
 
+	// On block maxHeight we will cancel the funding confirmation wait.
+	maxHeight := completeChan.FundingBroadcastHeight + maxWaitNumBlocksFundingConf
 	for {
 		select {
 		case epoch, ok := <-epochClient.Epochs:
@@ -1075,7 +1076,7 @@ func (f *fundingManager) waitForFundingWithTimeout(completeChan *channeldb.OpenC
 // when a channel has become active for lightning transactions.
 // The wait can be canceled by closing the cancelChan.
 func (f *fundingManager) waitForFundingConfirmation(completeChan *channeldb.OpenChannel,
-	bestHeight uint32, cancelChan <-chan struct{}, doneChan chan<- struct{}) {
+	cancelChan <-chan struct{}, doneChan chan<- struct{}) {
 
 	defer close(doneChan)
 

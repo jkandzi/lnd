@@ -130,10 +130,6 @@ const (
 // to an on-disk log, which can then subsequently be queried in order to
 // "time-travel" to a prior state.
 type OpenChannel struct {
-	// BroadcastHeight is the approximate blockchain height the funding
-	// transaction was broadcasted.
-	BroadcastHeight uint32
-
 	// OpeningHeight is the height in which this channel was officially
 	// marked open.
 	OpeningHeight uint32
