@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	litecoinCfg "github.com/ltcsuite/ltcd/chaincfg"
