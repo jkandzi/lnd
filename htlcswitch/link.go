@@ -324,7 +324,7 @@ out:
 // handleDownStreamPkt processes an HTLC packet sent from the downstream HTLC
 // Switch. Possible messages sent by the switch include requests to forward new
 // HTLCs, timeout previously cleared HTLCs, and finally to settle currently
-// cleared HTLCs with the upstream peer.
+// cleared HTLCs with the upstream peer. Fee update requests are also possible.
 func (l *channelLink) handleDownStreamPkt(pkt *htlcPacket) {
 	var isSettle bool
 	switch htlc := pkt.htlc.(type) {
@@ -558,6 +558,15 @@ func (l *channelLink) handleUpstreamMsg(msg lnwire.Message) {
 				}
 			}
 		}()
+	case *lnwire.UpdateFee:
+		// We received fee update from peer. If we are the initator we will fail the
+		// channel, if not we will apply the update.
+		fee := msg.FeePerKw
+		if err := l.channel.ReceiveUpdateFee(fee); err != nil {
+			log.Errorf("error receiving fee update: %v", err)
+			l.cfg.Peer.Disconnect()
+			return
+		}
 	}
 }
 
@@ -876,4 +885,21 @@ func (l *channelLink) sendHTLCError(rHash [32]byte,
 		ID:     index,
 		Reason: reason,
 	})
+}
+
+// UpdateChannelFee updates the commitment fee-per-kw on this channel by
+// committing to an update_fee message.
+func (l *channelLink) UpdateChannelFee(feePerKw btcutil.Amount) error {
+
+	// Update local fee
+	if err := l.channel.UpdateFee(feePerKw); err != nil {
+		return err
+	}
+
+	// Send fee update to remote
+	msg := lnwire.NewUpdateFee(l.ChanID(), feePerKw)
+	if err := l.cfg.Peer.SendMessage(msg); err != nil {
+		return err
+	}
+	return nil
 }

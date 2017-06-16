@@ -426,6 +426,7 @@ func (c *OpenChannel) UpdateCommitment(newCommitment *wire.MsgTx,
 		c.NumUpdates = delta.UpdateNum
 		c.Htlcs = delta.Htlcs
 		c.CommitFee = delta.CommitFee
+		c.FeePerKw = delta.FeePerKw
 
 		// First we'll write out the current latest dynamic channel
 		// state: the current channel balance, the number of updates,
@@ -441,6 +442,9 @@ func (c *OpenChannel) UpdateCommitment(newCommitment *wire.MsgTx,
 			return err
 		}
 		if err := putChanCommitFee(chanBucket, c); err != nil {
+			return err
+		}
+		if err := putChanFeePerKw(chanBucket, c); err != nil {
 			return err
 		}
 		if err := putChanCommitTxns(nodeChanBucket, c); err != nil {
@@ -514,6 +518,10 @@ type ChannelDelta struct {
 	// CommitFee is the fee that has been subtracted from the channel
 	// initiator's balance at this point in the commitment chain.
 	CommitFee btcutil.Amount
+
+	// FeePerKw is the fee per kw used to calculate the commit fee at this point
+	// in the commit chain.
+	FeePerKw btcutil.Amount
 
 	// UpdateNum is the update number that this ChannelDelta represents the
 	// total number of commitment updates to this point. This can be viewed
@@ -2202,6 +2210,11 @@ func serializeChannelDelta(w io.Writer, delta *ChannelDelta) error {
 		return err
 	}
 
+	byteOrder.PutUint64(scratch[:], uint64(delta.FeePerKw))
+	if _, err := w.Write(scratch[:]); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -2244,6 +2257,11 @@ func deserializeChannelDelta(r io.Reader) (*ChannelDelta, error) {
 		return nil, err
 	}
 	delta.CommitFee = btcutil.Amount(byteOrder.Uint64(scratch[:]))
+
+	if _, err := r.Read(scratch[:]); err != nil {
+		return nil, err
+	}
+	delta.FeePerKw = btcutil.Amount(byteOrder.Uint64(scratch[:]))
 
 	return delta, nil
 }
