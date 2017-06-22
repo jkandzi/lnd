@@ -714,14 +714,15 @@ func TestCooperativeChannelClosure(t *testing.T) {
 	bobFeeRate := uint64(bobChannel.channelState.FeePerKw)
 
 	// First we test creating of cooperative close proposals.
-	aliceSig, _, err := aliceChannel.CreateCloseProposal(
-		aliceFeeRate)
+	aliceFee := aliceChannel.GetFee(aliceFeeRate)
+	aliceSig, _, err := aliceChannel.CreateCloseProposal(aliceFee)
 	if err != nil {
 		t.Fatalf("unable to create alice coop close proposal: %v", err)
 	}
 	aliceCloseSig := append(aliceSig, byte(txscript.SigHashAll))
 
-	bobSig, _, err := bobChannel.CreateCloseProposal(bobFeeRate)
+	bobFee := bobChannel.GetFee(bobFeeRate)
+	bobSig, _, err := bobChannel.CreateCloseProposal(bobFee)
 	if err != nil {
 		t.Fatalf("unable to create bob coop close proposal: %v", err)
 	}
@@ -1491,13 +1492,15 @@ func TestCooperativeCloseDustAdherence(t *testing.T) {
 	// Both sides currently have over 1 BTC settled as part of their
 	// balances. As a result, performing a cooperative closure now result
 	// in both sides having an output within the closure transaction.
-	aliceSig, _, err := aliceChannel.CreateCloseProposal(aliceFeeRate)
+	aliceFee := aliceChannel.GetFee(aliceFeeRate)
+	aliceSig, _, err := aliceChannel.CreateCloseProposal(aliceFee)
 	if err != nil {
 		t.Fatalf("unable to close channel: %v", err)
 	}
 	aliceCloseSig := append(aliceSig, byte(txscript.SigHashAll))
 
-	bobSig, _, err := bobChannel.CreateCloseProposal(bobFeeRate)
+	bobFee := bobChannel.GetFee(bobFeeRate)
+	bobSig, _, err := bobChannel.CreateCloseProposal(bobFee)
 	if err != nil {
 		t.Fatalf("unable to close channel: %v", err)
 	}
@@ -1526,13 +1529,13 @@ func TestCooperativeCloseDustAdherence(t *testing.T) {
 
 	// Attempt another cooperative channel closure. It should succeed
 	// without any issues.
-	aliceSig, _, err = aliceChannel.CreateCloseProposal(aliceFeeRate)
+	aliceSig, _, err = aliceChannel.CreateCloseProposal(aliceFee)
 	if err != nil {
 		t.Fatalf("unable to close channel: %v", err)
 	}
 	aliceCloseSig = append(aliceSig, byte(txscript.SigHashAll))
 
-	bobSig, _, err = bobChannel.CreateCloseProposal(bobFeeRate)
+	bobSig, _, err = bobChannel.CreateCloseProposal(bobFee)
 	if err != nil {
 		t.Fatalf("unable to close channel: %v", err)
 	}
@@ -1562,13 +1565,13 @@ func TestCooperativeCloseDustAdherence(t *testing.T) {
 
 	// Our final attempt at another cooperative channel closure. It should
 	// succeed without any issues.
-	aliceSig, _, err = aliceChannel.CreateCloseProposal(aliceFeeRate)
+	aliceSig, _, err = aliceChannel.CreateCloseProposal(aliceFee)
 	if err != nil {
 		t.Fatalf("unable to close channel: %v", err)
 	}
 	aliceCloseSig = append(aliceSig, byte(txscript.SigHashAll))
 
-	bobSig, _, err = bobChannel.CreateCloseProposal(bobFeeRate)
+	bobSig, _, err = bobChannel.CreateCloseProposal(bobFee)
 	if err != nil {
 		t.Fatalf("unable to close channel: %v", err)
 	}

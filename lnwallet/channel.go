@@ -77,12 +77,12 @@ const (
 
 	// channelClosing represents a channel which is in the process of being
 	// closed.
-	channelClosing
+	ChannelClosing
 
 	// channelClosed represents a channel which has been fully closed. Note
 	// that before a channel can be closed, ALL pending HTLCs must be
 	// settled/removed.
-	channelClosed
+	ChannelClosed
 
 	// channelDispute indicates that an un-cooperative closure has been
 	// detected within the channel.
@@ -1000,8 +1000,8 @@ func (lc *LightningChannel) closeObserver(channelCloseNtfn *chainntnfs.SpendEven
 	// If we've already initiated a local cooperative or unilateral close
 	// locally, then we have nothing more to do.
 	lc.RLock()
-	if lc.status == channelClosed || lc.status == channelDispute ||
-		lc.status == channelClosing {
+	if lc.status == ChannelClosed || lc.status == channelDispute ||
+		lc.status == ChannelClosing {
 
 		lc.RUnlock()
 		return
@@ -2610,14 +2610,14 @@ func (lc *LightningChannel) ForceClose() (*ForceCloseSummary, error) {
 //
 // TODO(roasbeef): caller should initiate signal to reject all incoming HTLCs,
 // settle any inflight.
-func (lc *LightningChannel) CreateCloseProposal(feeRate uint64) ([]byte, uint64,
+func (lc *LightningChannel) CreateCloseProposal(proposedFee uint64) ([]byte, uint64,
 	error) {
 
 	lc.Lock()
 	defer lc.Unlock()
 
-	// If we're already closing the channel, then ignore this request.
-	if lc.status == channelClosing || lc.status == channelClosed {
+	// If we've already closed the channel, then ignore this request.
+	if lc.status == ChannelClosed {
 		// TODO(roasbeef): check to ensure no pending payments
 		return nil, 0, ErrChanClosing
 	}
@@ -2625,7 +2625,7 @@ func (lc *LightningChannel) CreateCloseProposal(feeRate uint64) ([]byte, uint64,
 	// Subtract the proposed fee from the appropriate balance, taking care
 	// not to persist the adjusted balance, as the feeRate may change
 	// during the channel closing process.
-	proposedFee := uint64(btcutil.Amount(feeRate) * commitWeight / 1000)
+	// proposedFee := uint64(btcutil.Amount(feeRate) * commitWeight / 1000)
 	ourBalance := lc.channelState.OurBalance
 	theirBalance := lc.channelState.TheirBalance
 
@@ -2660,7 +2660,7 @@ func (lc *LightningChannel) CreateCloseProposal(feeRate uint64) ([]byte, uint64,
 
 	// As everything checks out, indicate in the channel status that a
 	// channel closure has been initiated.
-	lc.status = channelClosing
+	lc.status = ChannelClosing
 
 	return sig, proposedFee, nil
 }
@@ -2672,12 +2672,12 @@ func (lc *LightningChannel) CreateCloseProposal(feeRate uint64) ([]byte, uint64,
 // NOTE: The passed local and remote sigs are expected to be fully complete
 // signatures including the proper sighash byte.
 func (lc *LightningChannel) CompleteCooperativeClose(localSig, remoteSig []byte,
-	feeRate uint64) (*wire.MsgTx, error) {
+	proposedFee uint64) (*wire.MsgTx, error) {
 	lc.Lock()
 	defer lc.Unlock()
 
 	// If the channel is already closed, then ignore this request.
-	if lc.status == channelClosed {
+	if lc.status == ChannelClosed {
 		// TODO(roasbeef): check to ensure no pending payments
 		return nil, ErrChanClosing
 	}
@@ -2685,7 +2685,8 @@ func (lc *LightningChannel) CompleteCooperativeClose(localSig, remoteSig []byte,
 	// Subtract the proposed fee from the appropriate balance, taking care
 	// not to persist the adjusted balance, as the feeRate may change
 	// during the channel closing process.
-	proposedFee := uint64(btcutil.Amount(feeRate) * commitWeight / 1000)
+	// proposedFee := uint64(btcutil.Amount(feeRate) * commitWeight / 1000)
+	fmt.Println("completing coop close it propised fee", proposedFee)
 	ourBalance := lc.channelState.OurBalance
 	theirBalance := lc.channelState.TheirBalance
 
@@ -2735,7 +2736,7 @@ func (lc *LightningChannel) CompleteCooperativeClose(localSig, remoteSig []byte,
 	// As the transaction is sane, and the scripts are valid we'll mark the
 	// channel now as closed as the closure transaction should get into the
 	// chain in a timely manner and possibly be re-broadcast by the wallet.
-	lc.status = channelClosed
+	lc.status = ChannelClosed
 
 	return closeTx, nil
 }
@@ -2846,4 +2847,18 @@ func CreateCooperativeCloseTx(fundingTxIn *wire.TxIn,
 	txsort.InPlaceSort(closeTx)
 
 	return closeTx
+}
+
+//
+func (lc *LightningChannel) GetFeeRate(commitFee uint64) uint64 {
+	// proposedFee := btcutil.Amount(feeRate) * commitWeight / 1000
+	return uint64(btcutil.Amount(commitFee) * 1000 / commitWeight)
+}
+
+func (lc *LightningChannel) GetFee(feeRate uint64) uint64 {
+	return uint64(btcutil.Amount(feeRate) * commitWeight / 1000)
+}
+
+func (lc *LightningChannel) GetChannelStatus() channelState {
+	return lc.status
 }
