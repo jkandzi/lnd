@@ -439,8 +439,9 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(nMsg *networkMsg) []l
 
 	switch msg := nMsg.msg.(type) {
 
-	// A new node announcement has arrived which either presents a new
-	// node, or a node updating previously advertised information.
+	// A new node announcement has arrived which either presents new information
+	// about a node in one of the channels we know about, or a updating
+	// previously advertised information.
 	case *lnwire.NodeAnnouncement:
 		if nMsg.isRemote {
 			if err := d.validateNodeAnn(msg); err != nil {
@@ -537,6 +538,10 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(nMsg *networkMsg) []l
 			BitcoinKey2: msg.BitcoinKey2,
 			AuthProof:   proof,
 		}
+
+		// We will add the edge to the channel router. If the nodes present in this
+		// channel is not present in the database from before, a partial node will
+		// be added to represent it while we wait for a node announcement.
 		if err := d.cfg.Router.AddEdge(edge); err != nil {
 			if routing.IsError(err, routing.ErrOutdated,
 				routing.ErrIgnored) {
@@ -896,30 +901,10 @@ func (d *AuthenticatedGossiper) synchronizeWithNode(syncReq *syncRequest) error 
 	// containing all the messages to be sent to the target peer.
 	var announceMessages []lnwire.Message
 
-	// First run through all the vertexes in the graph, retrieving the data
-	// for the announcement we originally retrieved.
-	var numNodes uint32
-	if err := d.cfg.Router.ForEachNode(func(node *channeldb.LightningNode) error {
-		ann := &lnwire.NodeAnnouncement{
-			Signature: node.AuthSig,
-			Timestamp: uint32(node.LastUpdate.Unix()),
-			Addresses: node.Addresses,
-			NodeID:    node.PubKey,
-			Alias:     lnwire.NewAlias(node.Alias),
-			Features:  node.Features,
-		}
-		announceMessages = append(announceMessages, ann)
-
-		numNodes++
-
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	// With the vertexes gathered, we'll no retrieve the initial
-	// announcement, as well as the latest channel update announcement for
-	// both of the directed infos that make up the channel.
+	// As peers are expecting channel announcements before node announcements, we
+	// first retrieve the initial announcement, as well as the latest channel
+	// update announcement for both of the directed infos that make up each
+	// channel, and queue these to be sent to the peer.
 	var numEdges uint32
 	if err := d.cfg.Router.ForEachChannel(func(chanInfo *channeldb.ChannelEdgeInfo,
 		e1, e2 *channeldb.ChannelEdgePolicy) error {
@@ -944,6 +929,32 @@ func (d *AuthenticatedGossiper) synchronizeWithNode(syncReq *syncRequest) error 
 		return nil
 	}); err != nil && err != channeldb.ErrGraphNoEdgesFound {
 		log.Errorf("unable to sync infos with peer: %v", err)
+		return err
+	}
+
+	// Then run through all the vertexes in the graph, retrieving the data
+	// for the announcement we originally retrieved.
+	var numNodes uint32
+	if err := d.cfg.Router.ForEachNode(func(node *channeldb.LightningNode) error {
+		// If this is a partial node, we don't have the data needed to create a
+		// node announcement
+		if node.LastUpdate.Unix() == 0 {
+			return nil
+		}
+		ann := &lnwire.NodeAnnouncement{
+			Signature: node.AuthSig,
+			Timestamp: uint32(node.LastUpdate.Unix()),
+			Addresses: node.Addresses,
+			NodeID:    node.PubKey,
+			Alias:     lnwire.NewAlias(node.Alias),
+			Features:  node.Features,
+		}
+		announceMessages = append(announceMessages, ann)
+
+		numNodes++
+
+		return nil
+	}); err != nil {
 		return err
 	}
 

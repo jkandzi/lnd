@@ -328,9 +328,13 @@ func (c *ChannelGraph) SetSourceNode(node *LightningNode) error {
 	})
 }
 
-// AddLightningNode adds a new (unconnected) vertex/node to the graph database.
-// When adding an edge, each node must be added before the edge can be
-// inserted. Afterwards the edge information can then be updated.
+// AddLightningNode adds a vertex/node to the graph database. If the node is
+// in the database from before, this will add a new, unconnected one to the
+// graph. If it is present from before, this will update that node's
+// information. Note that this method is expected to only be called to update
+// an already present node from a node annoucement, or to insert a node found
+// in a channel update.
+//
 // TODO(roasbeef): also need sig of announcement
 func (c *ChannelGraph) AddLightningNode(node *LightningNode) error {
 	return c.db.Update(func(tx *bolt.Tx) error {
@@ -350,6 +354,29 @@ func addLightningNode(tx *bolt.Tx, node *LightningNode) error {
 	}
 
 	return putLightningNode(nodes, aliases, node)
+}
+
+// AddPartialLightningNode adds LightningNode with only the pubkey set to the
+// database. This is used to add a representation of the node to the db before
+// the remainding inforamation is received in a node announcement.
+func (c *ChannelGraph) AddPartialLightningNode(node *LightningNode) error {
+	return c.db.Update(func(tx *bolt.Tx) error {
+		return addPartialLightningNode(tx, node)
+	})
+}
+
+func addPartialLightningNode(tx *bolt.Tx, node *LightningNode) error {
+	nodes, err := tx.CreateBucketIfNotExists(nodeBucket)
+	if err != nil {
+		return err
+	}
+
+	aliases, err := nodes.CreateBucketIfNotExists(aliasIndexBucket)
+	if err != nil {
+		return err
+	}
+
+	return putPartialLightningNode(nodes, aliases, node)
 }
 
 // LookupAlias attempts to return the alias as advertised by the target node.
@@ -1459,6 +1486,31 @@ func putLightningNode(nodeBucket *bolt.Bucket, aliasBucket *bolt.Bucket, node *L
 	return nodeBucket.Put(nodePub, b.Bytes())
 }
 
+func putPartialLightningNode(nodeBucket *bolt.Bucket, aliasBucket *bolt.Bucket, node *LightningNode) error {
+	var (
+		scratch [8]byte
+		b       bytes.Buffer
+	)
+
+	nodePub := node.PubKey.SerializeCompressed()
+
+	if err := aliasBucket.Put(nodePub, []byte(node.Alias)); err != nil {
+		return err
+	}
+
+	updateUnix := uint64(0)
+	byteOrder.PutUint64(scratch[:8], updateUnix)
+	if _, err := b.Write(scratch[:8]); err != nil {
+		return err
+	}
+
+	if _, err := b.Write(nodePub); err != nil {
+		return err
+	}
+
+	return nodeBucket.Put(nodePub, b.Bytes())
+}
+
 func fetchLightningNode(nodeBucket *bolt.Bucket,
 	nodePub []byte) (*LightningNode, error) {
 
@@ -1492,7 +1544,12 @@ func deserializeLightningNode(r io.Reader) (*LightningNode, error) {
 		return nil, err
 	}
 
-	if err := binary.Read(r, byteOrder, &node.Color.R); err != nil {
+	// The rest of the data is optional, so the next read might fail with EOF. In
+	// that case we return the partially constructed node.
+	err = binary.Read(r, byteOrder, &node.Color.R)
+	if err == io.EOF {
+		return node, nil
+	} else if err != nil {
 		return nil, err
 	}
 	if err := binary.Read(r, byteOrder, &node.Color.G); err != nil {

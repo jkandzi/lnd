@@ -297,7 +297,7 @@ func TestEdgeUpdateNotification(t *testing.T) {
 	ctx.chain.addBlock(fundingBlock, chanID.BlockHeight)
 
 	// Next we'll create two test nodes that the fake channel will be open
-	// between and add then as members of the channel graph.
+	// between.
 	node1, err := createTestNode()
 	if err != nil {
 		t.Fatalf("unable to create test node: %v", err)
@@ -305,15 +305,6 @@ func TestEdgeUpdateNotification(t *testing.T) {
 	node2, err := createTestNode()
 	if err != nil {
 		t.Fatalf("unable to create test node: %v", err)
-	}
-
-	// Send the two node topology updates to the channel router so they
-	// can be validated and stored within the graph database.
-	if err := ctx.router.AddNode(node1); err != nil {
-		t.Fatal(err)
-	}
-	if err := ctx.router.AddNode(node2); err != nil {
-		t.Fatal(err)
 	}
 
 	// Finally, to conclude our test set up, we'll create a channel
@@ -431,17 +422,29 @@ func TestEdgeUpdateNotification(t *testing.T) {
 func TestNodeUpdateNotification(t *testing.T) {
 	t.Parallel()
 
-	ctx, cleanUp, err := createTestCtx(1)
+	const startingBlockHeight = 101
+	ctx, cleanUp, err := createTestCtx(startingBlockHeight)
 	defer cleanUp()
 	if err != nil {
 		t.Fatalf("unable to create router: %v", err)
 	}
 
-	// Create a new client to receive notifications.
-	ntfnClient, err := ctx.router.SubscribeTopology()
+	// We only accept node announcements from nodes having a known channel, so
+	// create one now.
+	const chanValue = 10000
+	fundingTx, _, chanID, err := createChannelEdge(ctx,
+		bitcoinKey1.SerializeCompressed(), bitcoinKey2.SerializeCompressed(),
+		chanValue, startingBlockHeight)
 	if err != nil {
-		t.Fatalf("unable to subscribe for channel notifications: %v", err)
+		t.Fatalf("unable create channel edge: %v", err)
 	}
+
+	// We'll also add a record for the block that included our funding
+	// transaction.
+	fundingBlock := &wire.MsgBlock{
+		Transactions: []*wire.MsgTx{fundingTx},
+	}
+	ctx.chain.addBlock(fundingBlock, chanID.BlockHeight)
 
 	// Create two random nodes to add to send as node announcement messages
 	// to trigger notifications.
@@ -452,6 +455,29 @@ func TestNodeUpdateNotification(t *testing.T) {
 	node2, err := createTestNode()
 	if err != nil {
 		t.Fatalf("unable to create test node: %v", err)
+	}
+
+	edge := &channeldb.ChannelEdgeInfo{
+		ChannelID:   chanID.ToUint64(),
+		NodeKey1:    node1.PubKey,
+		NodeKey2:    node2.PubKey,
+		BitcoinKey1: bitcoinKey1,
+		BitcoinKey2: bitcoinKey2,
+		AuthProof: &channeldb.ChannelAuthProof{
+			NodeSig1:    testSig,
+			NodeSig2:    testSig,
+			BitcoinSig1: testSig,
+			BitcoinSig2: testSig,
+		},
+	}
+	if err := ctx.router.AddEdge(edge); err != nil {
+		t.Fatalf("unable to add edge: %v", err)
+	}
+
+	// Create a new client to receive notifications.
+	ntfnClient, err := ctx.router.SubscribeTopology()
+	if err != nil {
+		t.Fatalf("unable to subscribe for channel notifications: %v", err)
 	}
 
 	// Change network topology by adding nodes to the channel router.
@@ -544,25 +570,66 @@ func TestNotificationCancellation(t *testing.T) {
 		t.Fatalf("unable to subscribe for channel notifications: %v", err)
 	}
 
+	// We'll create the utxo for a new channel.
+	const chanValue = 10000
+	fundingTx, _, chanID, err := createChannelEdge(ctx,
+		bitcoinKey1.SerializeCompressed(), bitcoinKey2.SerializeCompressed(),
+		chanValue, startingBlockHeight)
+	if err != nil {
+		t.Fatalf("unable create channel edge: %v", err)
+	}
+
+	// We'll also add a record for the block that included our funding
+	// transaction.
+	fundingBlock := &wire.MsgBlock{
+		Transactions: []*wire.MsgTx{fundingTx},
+	}
+	ctx.chain.addBlock(fundingBlock, chanID.BlockHeight)
+
 	// We'll create a fresh new node topology update to feed to the channel
 	// router.
-	node, err := createTestNode()
+	node1, err := createTestNode()
+	if err != nil {
+		t.Fatalf("unable to create test node: %v", err)
+	}
+	node2, err := createTestNode()
 	if err != nil {
 		t.Fatalf("unable to create test node: %v", err)
 	}
 
 	// Before we send the message to the channel router, we'll cancel the
 	// notifications for this client. As a result, the notification
-	// triggered by accepting this announcement shouldn't be sent to the
-	// client.
+	// triggered by accepting the edge and channel announcements shouldn't be
+	// sent to the client.
 	ntfnClient.Cancel()
 
-	if err := ctx.router.AddNode(node); err != nil {
+	edge := &channeldb.ChannelEdgeInfo{
+		ChannelID:   chanID.ToUint64(),
+		NodeKey1:    node1.PubKey,
+		NodeKey2:    node2.PubKey,
+		BitcoinKey1: bitcoinKey1,
+		BitcoinKey2: bitcoinKey2,
+		AuthProof: &channeldb.ChannelAuthProof{
+			NodeSig1:    testSig,
+			NodeSig2:    testSig,
+			BitcoinSig1: testSig,
+			BitcoinSig2: testSig,
+		},
+	}
+	if err := ctx.router.AddEdge(edge); err != nil {
+		t.Fatalf("unable to add edge: %v", err)
+	}
+
+	if err := ctx.router.AddNode(node1); err != nil {
+		t.Fatalf("unable to add node: %v", err)
+	}
+
+	if err := ctx.router.AddNode(node2); err != nil {
 		t.Fatalf("unable to add node: %v", err)
 	}
 
 	select {
-	// The notification shouldn't be sent, however, the channel should be
+	// The notifications shouldn't be sent, however, the channel should be
 	// closed, causing the second read-value to be false.
 	case _, ok := <-ntfnClient.TopologyChanges:
 		if !ok {
@@ -605,20 +672,14 @@ func TestChannelCloseNotification(t *testing.T) {
 	ctx.chain.addBlock(fundingBlock, chanID.BlockHeight)
 
 	// Next we'll create two test nodes that the fake channel will be open
-	// between and add then as members of the channel graph.
+	// between.
 	node1, err := createTestNode()
 	if err != nil {
 		t.Fatalf("unable to create test node: %v", err)
 	}
-	if err := ctx.router.AddNode(node1); err != nil {
-		t.Fatal(err)
-	}
 	node2, err := createTestNode()
 	if err != nil {
 		t.Fatalf("unable to create test node: %v", err)
-	}
-	if err := ctx.router.AddNode(node2); err != nil {
-		t.Fatal(err)
 	}
 
 	// Finally, to conclude our test set up, we'll create a channel

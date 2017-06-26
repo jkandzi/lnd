@@ -1246,6 +1246,8 @@ func (f *fundingManager) announceChannel(localIDKey, remoteIDKey, localFundingKe
 	f.cfg.SendAnnouncement(ann.chanAnn)
 	f.cfg.SendAnnouncement(ann.chanUpdateAnn)
 	f.cfg.SendAnnouncement(ann.chanProof)
+
+	// TODO: Send node announcement?
 }
 
 // initFundingWorkflow sends a message to the funding manager instructing it

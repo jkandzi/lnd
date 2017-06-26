@@ -828,3 +828,85 @@ func TestOrphanSignatureAnnouncement(t *testing.T) {
 		t.Fatal("wrong number of objects in storage")
 	}
 }
+
+// We should ignore node announcements of nodes not associated with any
+// previously announced channel.
+func TestOrphanNodeAnnouncement(t *testing.T) {
+	t.Parallel()
+
+	ctx, cleanup, err := createTestCtx(0)
+	if err != nil {
+		t.Fatalf("can't create context: %v", err)
+	}
+	defer cleanup()
+
+	// Create node valid, signed announcement, process it with with
+	// gossiper service, check that valid announcement have been
+	// propagated farther into the lightning network, and check that we
+	// added new node into router.
+	na, err := createNodeAnnouncement(nodeKeyPriv1)
+	if err != nil {
+		t.Fatalf("can't create node announcement: %v", err)
+	}
+
+	err = <-ctx.gossiper.ProcessRemoteAnnouncement(na, na.NodeID)
+	if err != nil {
+		t.Fatalf("can't process remote announcement: %v", err)
+	}
+
+	select {
+	case <-ctx.broadcastedMessage:
+	case <-time.After(2 * trickleDelay):
+		t.Fatal("announcememt wasn't proceeded")
+	}
+
+	if len(ctx.router.nodes) != 1 {
+		t.Fatalf("node wasn't added to router: %v", err)
+	}
+
+	// Pretending that we receive the valid channel announcement from
+	// remote side, and check that we broadcasted it to the our network,
+	// and added channel info in the router.
+	ca, err := createRemoteChannelAnnouncement(0)
+	if err != nil {
+		t.Fatalf("can't create channel announcement: %v", err)
+	}
+
+	err = <-ctx.gossiper.ProcessRemoteAnnouncement(ca, na.NodeID)
+	if err != nil {
+		t.Fatalf("can't process remote announcement: %v", err)
+	}
+
+	select {
+	case <-ctx.broadcastedMessage:
+	case <-time.After(2 * trickleDelay):
+		t.Fatal("announcememt wasn't proceeded")
+	}
+
+	if len(ctx.router.infos) != 1 {
+		t.Fatalf("edge wasn't added to router: %v", err)
+	}
+
+	// Pretending that we received valid channel policy update from remote
+	// side, and check that we broadcasted it to the other network, and
+	// added updates to the router.
+	ua, err := createUpdateAnnouncement(0)
+	if err != nil {
+		t.Fatalf("can't create update announcement: %v", err)
+	}
+
+	err = <-ctx.gossiper.ProcessRemoteAnnouncement(ua, na.NodeID)
+	if err != nil {
+		t.Fatalf("can't process remote announcement: %v", err)
+	}
+
+	select {
+	case <-ctx.broadcastedMessage:
+	case <-time.After(2 * trickleDelay):
+		t.Fatal("announcememt wasn't proceeded")
+	}
+
+	if len(ctx.router.edges) != 1 {
+		t.Fatalf("edge update wasn't added to router: %v", err)
+	}
+}
