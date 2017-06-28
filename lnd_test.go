@@ -2300,6 +2300,13 @@ func testGraphTopologyNotifications(net *networkHarness, t *harnessTest) {
 		t.Fatalf("unable to create new nodes: %v", err)
 	}
 
+	if err := net.ConnectNodes(ctxb, net.Bob, carol); err != nil {
+		t.Fatalf("unable to connect bob to carol: %v", err)
+	}
+	ctxt, _ = context.WithTimeout(ctxb, timeout)
+	chanPoint = openChannelAndAssert(ctxt, t, net, net.Bob, carol,
+		chanAmt/2, 0)
+
 	// Connect the new node above to Alice. This should result in the nodes
 	// syncing up their respective graph state, with the new addition being
 	// the existence of Carol in the graph.
@@ -2323,6 +2330,8 @@ func testGraphTopologyNotifications(net *networkHarness, t *harnessTest) {
 	case <-time.After(time.Second * 10):
 		t.Fatalf("node update ntfn not sent")
 	}
+	ctxt, _ = context.WithTimeout(context.Background(), timeout)
+	closeChannelAndAssert(ctxt, t, net, net.Bob, chanPoint, false)
 
 	close(quit)
 
