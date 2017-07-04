@@ -436,6 +436,7 @@ func TestSimpleAddSettleWorkflow(t *testing.T) {
 	if err := aliceChannel.ReceiveNewCommitment(bobSig); err != nil {
 		t.Fatalf("alice unable to process bob's new commitment: %v", err)
 	}
+
 	// Alice then generates a revocation for bob.
 	aliceRevocation, err := aliceChannel.RevokeCurrentCommitment()
 	if err != nil {
@@ -1585,8 +1586,8 @@ func TestCooperativeCloseDustAdherence(t *testing.T) {
 	}
 }
 
-// Test that the signature verification will fail if they fee updates are out of
-// sync.
+// TestUpdateFeeFail tests that the signature verification will fail if they
+// fee updates are out of sync.
 func TestUpdateFeeFail(t *testing.T) {
 	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
 	if err != nil {
@@ -1597,13 +1598,13 @@ func TestUpdateFeeFail(t *testing.T) {
 	// Bob receives the update, that will apply to his commitment transaction
 	bobChannel.ReceiveUpdateFee(111)
 
-	// alice sends signature for commitment that does not cover any fee update.
+	// Alice sends signature for commitment that does not cover any fee update.
 	aliceSig, err := aliceChannel.SignNextCommitment()
 	if err != nil {
 		t.Fatalf("alice unable to sign commitment: %v", err)
 	}
 
-	// bob verifies this commit, meaning that he checks that it is consistent
+	// Bob verifies this commit, meaning that he checks that it is consistent
 	// everything he has received. This should fail, since he got the fee update,
 	// but Alice never sent it.
 	err = bobChannel.ReceiveNewCommitment(aliceSig)
@@ -1613,8 +1614,9 @@ func TestUpdateFeeFail(t *testing.T) {
 
 }
 
-// Test that the state machine progresses as expected if we send a fee update,
-// and then the sender of the fee update sends a commitment signature.
+// TestUpdateFeeSenderCommits veriefies that the state machine progresses as
+// expected if we send a fee update, and then the sender of the fee update
+// sends a commitment signature.
 func TestUpdateFeeSenderCommits(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -1648,8 +1650,8 @@ func TestUpdateFeeSenderCommits(t *testing.T) {
 	aliceChannel.UpdateFee(fee)
 	bobChannel.ReceiveUpdateFee(fee)
 
-	// Alice signs a commitment, which will cover everyhing sent to Bob (the
-	// HTLC and the fee update), and everyhing acked by Bob (nothing so far).
+	// Alice signs a commitment, which will cover everything sent to Bob (the
+	// HTLC and the fee update), and everything acked by Bob (nothing so far).
 	aliceSig, err := aliceChannel.SignNextCommitment()
 	if err != nil {
 		t.Fatalf("alice unable to sign commitment: %v", err)
@@ -1684,7 +1686,7 @@ func TestUpdateFeeSenderCommits(t *testing.T) {
 	}
 
 	// Alice receives the revocation of the old one, and can now assume that
-	// Bob's received everyhing up to the signature she sent, including the HTLC
+	// Bob's received everything up to the signature she sent, including the HTLC
 	// and fee update.
 	if _, err := aliceChannel.ReceiveRevocation(bobRevocation); err != nil {
 		t.Fatalf("alice unable to rocess bob's revocation: %v", err)
@@ -1716,8 +1718,9 @@ func TestUpdateFeeSenderCommits(t *testing.T) {
 
 }
 
-// Test that the state machine progresses as expected if we send a fee update,
-// and then the receiver of the fee update sends a commitment signature.
+// TestUpdateFeeReceiverCommits tests that the state machine progresses as
+// expected if we send a fee update, and then the receiver of the fee update
+// sends a commitment signature.
 func TestUpdateFeeReceiverCommits(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -1845,8 +1848,9 @@ func TestUpdateFeeReceiverCommits(t *testing.T) {
 
 }
 
-// Test that receiving a fee update as channel initiator fails, and that trying
-// to initiate fee update as non-initiatior fails.
+// TestUpdateFeeReceiverSendsUpdate tests that receiving a fee update as channel
+// initiator fails, and that trying to initiate fee update as non-initiatior
+// fails.
 func TestUpdateFeeReceiverSendsUpdate(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -1892,8 +1896,8 @@ func TestUpdateFeeMultipleUpdates(t *testing.T) {
 	aliceChannel.UpdateFee(fee2)
 	aliceChannel.UpdateFee(fee)
 
-	// Alice signs a commitment, which will cover everyhing sent to Bob (the
-	// HTLC and the fee update), and everyhing acked by Bob (nothing so far).
+	// Alice signs a commitment, which will cover everything sent to Bob (the
+	// HTLC and the fee update), and everything acked by Bob (nothing so far).
 	aliceSig, err := aliceChannel.SignNextCommitment()
 	if err != nil {
 		t.Fatalf("alice unable to sign commitment: %v", err)
@@ -1944,7 +1948,7 @@ func TestUpdateFeeMultipleUpdates(t *testing.T) {
 	}
 
 	// Alice receives the revocation of the old one, and can now assume that
-	// Bob's received everyhing up to the signature she sent, including the HTLC
+	// Bob's received everything up to the signature she sent, including the HTLC
 	// and fee update.
 	if _, err := aliceChannel.ReceiveRevocation(bobRevocation); err != nil {
 		t.Fatalf("alice unable to rocess bob's revocation: %v", err)

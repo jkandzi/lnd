@@ -324,7 +324,7 @@ out:
 // handleDownStreamPkt processes an HTLC packet sent from the downstream HTLC
 // Switch. Possible messages sent by the switch include requests to forward new
 // HTLCs, timeout previously cleared HTLCs, and finally to settle currently
-// cleared HTLCs with the upstream peer. Fee update requests are also possible.
+// cleared HTLCs with the upstream peer.
 func (l *channelLink) handleDownStreamPkt(pkt *htlcPacket) {
 	var isSettle bool
 	switch htlc := pkt.htlc.(type) {

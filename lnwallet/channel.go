@@ -2814,12 +2814,12 @@ func (lc *LightningChannel) StateSnapshot() *channeldb.ChannelSnapshot {
 	return lc.channelState.Snapshot()
 }
 
-// UpdateFee sets the fee of the remote state, and our pending local state fee.
-// Our local fee will be finally set when the update_fee message is acked by the
-// remote. Must be called before sending update_fee to remote.
-func (lc *LightningChannel) UpdateFee(fee btcutil.Amount) error {
-	lc.RLock()
-	defer lc.RUnlock()
+// UpdateFee initiates a fee update for this channel. Must only be called by
+// the channel initiator, and must be called before sending update_fee to
+// the remote.
+func (lc *LightningChannel) UpdateFee(feePerKw btcutil.Amount) error {
+	lc.Lock()
+	defer lc.Unlock()
 
 	// Only initiator can send fee update, so trying to send one as
 	// non-initiatior will fail.
@@ -2827,18 +2827,16 @@ func (lc *LightningChannel) UpdateFee(fee btcutil.Amount) error {
 		return fmt.Errorf("local fee update as non-initiatior")
 	}
 
-	lc.pendingFeeUpdate = &fee
+	lc.pendingFeeUpdate = &feePerKw
 
 	return nil
 }
 
-// ReceiveUpdateFee handles an updated fee sent from remote. This will set the
-// local state fee, and the pending remote state fee. The remote state fee will
-// be finally set when we revoke our current commitment. This method will return
-// an error if called as channel initiator.
-func (lc *LightningChannel) ReceiveUpdateFee(fee btcutil.Amount) error {
-	lc.RLock()
-	defer lc.RUnlock()
+// ReceiveUpdateFee handles an updated fee sent from remote. This method will
+// return an error if called as channel initiator.
+func (lc *LightningChannel) ReceiveUpdateFee(feePerKw btcutil.Amount) error {
+	lc.Lock()
+	defer lc.Unlock()
 
 	// Only initiator can send fee update, and we must fail if we receive fee
 	// update as initiatior
@@ -2848,7 +2846,7 @@ func (lc *LightningChannel) ReceiveUpdateFee(fee btcutil.Amount) error {
 
 	// TODO(halseth): should fail if fee update is unreasonable,
 	// as specified in BOLT#2.
-	lc.pendingFeeUpdate = &fee
+	lc.pendingFeeUpdate = &feePerKw
 
 	return nil
 }
