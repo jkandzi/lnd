@@ -385,3 +385,26 @@ func (m *mockNotifier) RegisterSpendNtfn(outpoint *wire.OutPoint) (*chainntnfs.S
 		Spend: make(chan *chainntnfs.SpendDetail),
 	}, nil
 }
+
+type mockPeer struct {
+	messages chan lnwire.Message
+}
+
+func (m *mockPeer) SendMessage(msg lnwire.Message) error {
+	m.messages <- msg
+	return nil
+}
+
+func (m *mockPeer) ID() [sha256.Size]byte {
+	return [sha256.Size]byte{}
+}
+
+func (m *mockPeer) WipeChannel(*lnwallet.LightningChannel) error {
+	return nil
+}
+
+func (m *mockPeer) PubKey() []byte {
+	return nil
+}
+
+func (m *mockPeer) Disconnect() {}

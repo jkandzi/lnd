@@ -2,6 +2,7 @@ package htlcswitch
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"testing"
 	"time"
@@ -203,7 +204,7 @@ func TestChannelLinkBidirectionalOneHopPayments(t *testing.T) {
 }
 
 // TestChannelLinkMultiHopPayment checks the ability to send payment over two
-// hopes. In this test we send the payment from Carol to Alice over Bob peer.
+// hops. In this test we send the payment from Carol to Alice over Bob peer.
 // (Carol -> Bob -> Alice) and checking that HTLC was settled properly and
 // balances were changed in two channels.
 func TestChannelLinkMultiHopPayment(t *testing.T) {
@@ -668,5 +669,135 @@ func TestChannelLinkSingleHopMessageOrdering(t *testing.T) {
 		n.bobServer,
 	}, amount); err != nil {
 		t.Fatalf("unable to make the payment: %v", err)
+	}
+}
+
+// TestChannelLinkFeeUpdate tests that a channel fee update by the
+// channel link is applied correctly.
+func TestChannelLinkFeeUpdate(t *testing.T) {
+
+	// Create lightning channels between Alice<->Bob
+	aliceChannel, bobChannel, fCleanUp, err := createTestChannel(
+		alicePrivKey, bobPrivKey, btcutil.SatoshiPerBitcoin*3,
+		btcutil.SatoshiPerBitcoin*5, 555)
+	if err != nil {
+		t.Fatalf("unable to create alice<->bob channel: %v", err)
+	}
+	defer fCleanUp()
+
+	aliceServer := newMockServer(t, "alice")
+	if err := aliceServer.Start(); err != nil {
+		t.Fatalf("unable to start alice server: %v", err)
+	}
+
+	bobServer := newMockServer(t, "bob")
+	if err := bobServer.Start(); err != nil {
+		t.Fatalf("unable to start alice server: %v", err)
+	}
+
+	decoder := &mockIteratorDecoder{}
+
+	alicePeer := &mockPeer{
+		messages: make(chan lnwire.Message, 1),
+	}
+	bobPeer := &mockPeer{
+		messages: make(chan lnwire.Message, 1),
+	}
+
+	aliceChannelLink := &channelLink{
+		cfg: &ChannelLinkConfig{
+			Peer:        bobPeer,
+			Switch:      aliceServer.htlcSwitch,
+			DecodeOnion: decoder.Decode,
+			Registry:    aliceServer.registry,
+		},
+		channel:        aliceChannel,
+		blobs:          make(map[uint64][lnwire.OnionPacketSize]byte),
+		upstream:       make(chan lnwire.Message),
+		downstream:     make(chan *htlcPacket),
+		control:        make(chan interface{}),
+		cancelReasons:  make(map[uint64]lnwire.OpaqueReason),
+		logCommitTimer: time.NewTimer(300 * time.Millisecond),
+		overflowQueue:  newWaitingQueue(),
+		quit:           make(chan struct{}),
+	}
+
+	if err := aliceChannelLink.Start(); err != nil {
+		t.Fatalf("unable to start alice channel link: %v", err)
+	}
+
+	bobChannelLink := NewChannelLink(
+		&ChannelLinkConfig{
+			Peer:        alicePeer,
+			Switch:      bobServer.htlcSwitch,
+			DecodeOnion: decoder.Decode,
+			Registry:    bobServer.registry,
+		}, bobChannel)
+
+	if err := bobChannelLink.Start(); err != nil {
+		t.Fatalf("unable to start bob channel link: %v", err)
+	}
+
+	go func() {
+		for {
+			select {
+			case msg := <-alicePeer.messages:
+				aliceChannelLink.HandleChannelUpdate(msg)
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			select {
+			case msg := <-bobPeer.messages:
+				bobChannelLink.HandleChannelUpdate(msg)
+			}
+		}
+	}()
+
+	// Now let Alice's channel link update the fee.
+	updatedFee := btcutil.Amount(6666)
+	if err := aliceChannelLink.updateChannelFee(updatedFee); err != nil {
+		t.Fatalf("failed updating fee: %v", err)
+	}
+
+	// Make a payment such that a new commitment tx will be created.
+	const htlcAmt = btcutil.SatoshiPerBitcoin
+
+	var preImage [32]byte
+	copy(preImage[:], bytes.Repeat([]byte{0xaa}, 32))
+	htlc := &lnwire.UpdateAddHTLC{
+		PaymentHash: sha256.Sum256(preImage[:]),
+		Amount:      htlcAmt,
+		Expiry:      10,
+	}
+
+	chanID := lnwire.NewChanIDFromOutPoint(aliceChannel.ChannelPoint())
+	bobHop := NewHopID(bobServer.PubKey())
+	packet := newAddPacket(chanID, bobHop, htlc)
+
+	aliceChannelLink.HandleSwitchPacket(packet)
+
+	time.Sleep(1000 * time.Millisecond)
+
+	// A new commitment tx shoulc now have been created, and we make sure
+	// it has the updated fee applied.
+	summary, err := aliceChannel.ForceClose()
+	if err != nil {
+		t.Fatalf("unable to force close alice's channel: %v", err)
+	}
+
+	expectedCommitFee := (updatedFee * btcutil.Amount(724)) / 1000
+
+	// Fee will be 8 BTC - sum of output values.
+	outVal := int64(0)
+	for _, tx := range summary.CloseTx.TxOut {
+		outVal += tx.Value
+	}
+
+	expectedOutput := int64(btcutil.SatoshiPerBitcoin*8 - expectedCommitFee)
+	if outVal != expectedOutput {
+		t.Fatalf("expected output value to be %v, was %v", expectedOutput, outVal)
 	}
 }

@@ -699,6 +699,23 @@ func (l *channelLink) HandleChannelUpdate(message lnwire.Message) {
 	}
 }
 
+// updateChannelFee updates the commitment fee-per-kw on this channel by
+// committing to an update_fee message.
+func (l *channelLink) updateChannelFee(feePerKw btcutil.Amount) error {
+
+	// Update local fee.
+	if err := l.channel.UpdateFee(feePerKw); err != nil {
+		return err
+	}
+
+	// Send fee update to remote.
+	msg := lnwire.NewUpdateFee(l.ChanID(), feePerKw)
+	if err := l.cfg.Peer.SendMessage(msg); err != nil {
+		return err
+	}
+	return nil
+}
+
 // processLockedInHtlcs function is used to proceed the HTLCs which was
 // designated as eligible for forwarding. But not all htlc will be forwarder,
 // if htlc reached its final destination that we should settle it.
@@ -885,21 +902,4 @@ func (l *channelLink) sendHTLCError(rHash [32]byte,
 		ID:     index,
 		Reason: reason,
 	})
-}
-
-// UpdateChannelFee updates the commitment fee-per-kw on this channel by
-// committing to an update_fee message.
-func (l *channelLink) UpdateChannelFee(feePerKw btcutil.Amount) error {
-
-	// Update local fee
-	if err := l.channel.UpdateFee(feePerKw); err != nil {
-		return err
-	}
-
-	// Send fee update to remote
-	msg := lnwire.NewUpdateFee(l.ChanID(), feePerKw)
-	if err := l.cfg.Peer.SendMessage(msg); err != nil {
-		return err
-	}
-	return nil
 }
