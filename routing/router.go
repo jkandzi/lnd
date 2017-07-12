@@ -574,9 +574,10 @@ func (r *ChannelRouter) processUpdate(msg interface{}) error {
 		_, exists, _ = r.cfg.Graph.HasLightningNode(msg.NodeKey1)
 		if !exists {
 			node1 := &channeldb.LightningNode{
-				PubKey: msg.NodeKey1,
+				PubKey:               msg.NodeKey1,
+				HaveNodeAnnouncement: false,
 			}
-			if err := r.cfg.Graph.AddPartialLightningNode(node1); err != nil {
+			if err := r.cfg.Graph.AddLightningNode(node1); err != nil {
 				return errors.Errorf("unable to add node %v to the "+
 					"graph: %v", node1.PubKey.SerializeCompressed(), err)
 			}
@@ -584,9 +585,10 @@ func (r *ChannelRouter) processUpdate(msg interface{}) error {
 		_, exists, _ = r.cfg.Graph.HasLightningNode(msg.NodeKey2)
 		if !exists {
 			node2 := &channeldb.LightningNode{
-				PubKey: msg.NodeKey2,
+				PubKey:               msg.NodeKey2,
+				HaveNodeAnnouncement: false,
 			}
-			if err := r.cfg.Graph.AddPartialLightningNode(node2); err != nil {
+			if err := r.cfg.Graph.AddLightningNode(node2); err != nil {
 				return errors.Errorf("unable to add node %v to the "+
 					"graph: %v", node2.PubKey.SerializeCompressed(), err)
 			}

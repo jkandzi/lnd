@@ -51,14 +51,15 @@ func createTestVertex(db *DB) (*LightningNode, error) {
 
 	pub := priv.PubKey().SerializeCompressed()
 	return &LightningNode{
-		AuthSig:    testSig,
-		LastUpdate: time.Unix(updateTime, 0),
-		PubKey:     priv.PubKey(),
-		Color:      color.RGBA{1, 2, 3, 0},
-		Alias:      "kek" + string(pub[:]),
-		Features:   testFeatures,
-		Addresses:  testAddrs,
-		db:         db,
+		HaveNodeAnnouncement: true,
+		AuthSig:              testSig,
+		LastUpdate:           time.Unix(updateTime, 0),
+		PubKey:               priv.PubKey(),
+		Color:                color.RGBA{1, 2, 3, 0},
+		Alias:                "kek" + string(pub[:]),
+		Features:             testFeatures,
+		Addresses:            testAddrs,
+		db:                   db,
 	}, nil
 }
 
@@ -77,14 +78,15 @@ func TestNodeInsertionAndDeletion(t *testing.T) {
 	// graph, so we'll create a test vertex to start with.
 	_, testPub := btcec.PrivKeyFromBytes(btcec.S256(), key[:])
 	node := &LightningNode{
-		AuthSig:    testSig,
-		LastUpdate: time.Unix(1232342, 0),
-		PubKey:     testPub,
-		Color:      color.RGBA{1, 2, 3, 0},
-		Alias:      "kek",
-		Features:   testFeatures,
-		Addresses:  testAddrs,
-		db:         db,
+		HaveNodeAnnouncement: true,
+		AuthSig:              testSig,
+		LastUpdate:           time.Unix(1232342, 0),
+		PubKey:               testPub,
+		Color:                color.RGBA{1, 2, 3, 0},
+		Alias:                "kek",
+		Features:             testFeatures,
+		Addresses:            testAddrs,
+		db:                   db,
 	}
 
 	// First, insert the node into the graph DB. This should succeed
@@ -136,14 +138,15 @@ func TestPartialNode(t *testing.T) {
 
 	graph := db.ChannelGraph()
 
-	// We want to be able to insert nodes into the graph that only has the PubKey
-	// set.
+	// We want to be able to insert nodes into the graph that only has the
+	// PubKey set.
 	_, testPub := btcec.PrivKeyFromBytes(btcec.S256(), key[:])
 	node := &LightningNode{
-		PubKey: testPub,
+		PubKey:               testPub,
+		HaveNodeAnnouncement: false,
 	}
 
-	if err := graph.AddPartialLightningNode(node); err != nil {
+	if err := graph.AddLightningNode(node); err != nil {
 		t.Fatalf("unable to add node: %v", err)
 	}
 
@@ -160,8 +163,8 @@ func TestPartialNode(t *testing.T) {
 		t.Fatalf("node should be found but wasn't")
 	}
 
-	// The two nodes should match exactly! (with default values for LastUpdate
-	// and db)
+	// The two nodes should match exactly! (with default values for
+	// LastUpdate and db)
 	node = &LightningNode{
 		LastUpdate: time.Unix(0, 0),
 		PubKey:     testPub,
@@ -989,6 +992,10 @@ func compareNodes(a, b *LightningNode) error {
 	if !reflect.DeepEqual(a.db, b.db) {
 		return fmt.Errorf("db doesn't match: expected %#v, \n "+
 			"got %#v", a.db, b.db)
+	}
+	if !reflect.DeepEqual(a.HaveNodeAnnouncement, b.HaveNodeAnnouncement) {
+		return fmt.Errorf("HaveNodeAnnouncement doesn't match: expected %#v, \n "+
+			"got %#v", a.HaveNodeAnnouncement, b.HaveNodeAnnouncement)
 	}
 
 	return nil

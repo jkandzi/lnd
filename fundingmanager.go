@@ -177,6 +177,8 @@ type fundingConfig struct {
 	// DefaultRoutingPolicy is the default routing policy used when
 	// initially announcing channels.
 	DefaultRoutingPolicy htlcswitch.ForwardingPolicy
+
+	SignNodeAnnouncement func(nodeAnn *lnwire.NodeAnnouncement) (*btcec.Signature, error)
 }
 
 // fundingManager acts as an orchestrator/bridge between the wallet's
@@ -1247,7 +1249,38 @@ func (f *fundingManager) announceChannel(localIDKey, remoteIDKey, localFundingKe
 	f.cfg.SendAnnouncement(ann.chanUpdateAnn)
 	f.cfg.SendAnnouncement(ann.chanProof)
 
-	// TODO: Send node announcement?
+	// Now that the channel is announced to the network, we will also create
+	// and send a node announcement. This is done since a node announcement
+	// is only accepted after a channel is known for that particular node,
+	// and this might be our first channel.
+	graph := f.cfg.Wallet.ChannelDB.ChannelGraph()
+	self, err := graph.FetchLightningNode(f.cfg.IDKey)
+	if err != nil {
+		fndgLog.Errorf("unable to fetch own lightning node from "+
+			"channel graph: %v", err)
+		return
+	}
+
+	// TODO: Not use time.Now()?
+	nodeAnn := &lnwire.NodeAnnouncement{
+		// Signature: self.AuthSig,
+		Timestamp: uint32(time.Now().Unix()),
+		Addresses: self.Addresses,
+		NodeID:    self.PubKey,
+		Alias:     lnwire.NewAlias(self.Alias),
+		Features:  self.Features,
+	}
+
+	sign, err := f.cfg.SignNodeAnnouncement(nodeAnn)
+	if err != nil {
+		fndgLog.Errorf("unable to generate signature for "+
+			"self node announcement: %v", err)
+		return
+	}
+
+	nodeAnn.Signature = sign
+
+	f.cfg.SendAnnouncement(nodeAnn)
 }
 
 // initFundingWorkflow sends a message to the funding manager instructing it

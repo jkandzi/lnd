@@ -52,13 +52,14 @@ func createTestNode() (*channeldb.LightningNode, error) {
 
 	pub := priv.PubKey().SerializeCompressed()
 	return &channeldb.LightningNode{
-		LastUpdate: time.Unix(updateTime, 0),
-		Addresses:  testAddrs,
-		PubKey:     priv.PubKey(),
-		Color:      color.RGBA{1, 2, 3, 0},
-		Alias:      "kek" + string(pub[:]),
-		AuthSig:    testSig,
-		Features:   testFeatures,
+		HaveNodeAnnouncement: true,
+		LastUpdate:           time.Unix(updateTime, 0),
+		Addresses:            testAddrs,
+		PubKey:               priv.PubKey(),
+		Color:                color.RGBA{1, 2, 3, 0},
+		Alias:                "kek" + string(pub[:]),
+		AuthSig:              testSig,
+		Features:             testFeatures,
 	}, nil
 }
 

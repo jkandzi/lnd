@@ -288,13 +288,14 @@ func TestIgnoreNodeAnnouncement(t *testing.T) {
 	}
 
 	node := &channeldb.LightningNode{
-		LastUpdate: time.Unix(123, 0),
-		Addresses:  testAddrs,
-		PubKey:     priv1.PubKey(),
-		Color:      color.RGBA{1, 2, 3, 0},
-		Alias:      "node11",
-		AuthSig:    testSig,
-		Features:   testFeatures,
+		HaveNodeAnnouncement: true,
+		LastUpdate:           time.Unix(123, 0),
+		Addresses:            testAddrs,
+		PubKey:               priv1.PubKey(),
+		Color:                color.RGBA{1, 2, 3, 0},
+		Alias:                "node11",
+		AuthSig:              testSig,
+		Features:             testFeatures,
 	}
 
 	err = ctx.router.AddNode(node)
@@ -480,13 +481,14 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 	// Now check that we can update the node info for the partial node without
 	// messing up the channel graph.
 	n1 := &channeldb.LightningNode{
-		LastUpdate: time.Unix(123, 0),
-		Addresses:  testAddrs,
-		PubKey:     priv1.PubKey(),
-		Color:      color.RGBA{1, 2, 3, 0},
-		Alias:      "node11",
-		AuthSig:    testSig,
-		Features:   testFeatures,
+		HaveNodeAnnouncement: true,
+		LastUpdate:           time.Unix(123, 0),
+		Addresses:            testAddrs,
+		PubKey:               priv1.PubKey(),
+		Color:                color.RGBA{1, 2, 3, 0},
+		Alias:                "node11",
+		AuthSig:              testSig,
+		Features:             testFeatures,
 	}
 
 	if err := ctx.router.AddNode(n1); err != nil {
@@ -494,13 +496,14 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 	}
 
 	n2 := &channeldb.LightningNode{
-		LastUpdate: time.Unix(123, 0),
-		Addresses:  testAddrs,
-		PubKey:     priv2.PubKey(),
-		Color:      color.RGBA{1, 2, 3, 0},
-		Alias:      "node22",
-		AuthSig:    testSig,
-		Features:   testFeatures,
+		HaveNodeAnnouncement: true,
+		LastUpdate:           time.Unix(123, 0),
+		Addresses:            testAddrs,
+		PubKey:               priv2.PubKey(),
+		Color:                color.RGBA{1, 2, 3, 0},
+		Alias:                "node22",
+		AuthSig:              testSig,
+		Features:             testFeatures,
 	}
 
 	if err := ctx.router.AddNode(n2); err != nil {

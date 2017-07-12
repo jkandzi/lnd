@@ -454,12 +454,13 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(nMsg *networkMsg) []l
 		}
 
 		node := &channeldb.LightningNode{
-			LastUpdate: time.Unix(int64(msg.Timestamp), 0),
-			Addresses:  msg.Addresses,
-			PubKey:     msg.NodeID,
-			Alias:      msg.Alias.String(),
-			AuthSig:    msg.Signature,
-			Features:   msg.Features,
+			HaveNodeAnnouncement: true,
+			LastUpdate:           time.Unix(int64(msg.Timestamp), 0),
+			Addresses:            msg.Addresses,
+			PubKey:               msg.NodeID,
+			Alias:                msg.Alias.String(),
+			AuthSig:              msg.Signature,
+			Features:             msg.Features,
 		}
 
 		if err := d.cfg.Router.AddNode(node); err != nil {
@@ -539,9 +540,10 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(nMsg *networkMsg) []l
 			AuthProof:   proof,
 		}
 
-		// We will add the edge to the channel router. If the nodes present in this
-		// channel is not present in the database from before, a partial node will
-		// be added to represent it while we wait for a node announcement.
+		// We will add the edge to the channel router. If the nodes
+		// present in this channel are not present in the database, a
+		// partial node will/ be added to represent it while we wait
+		// for a node announcement.
 		if err := d.cfg.Router.AddEdge(edge); err != nil {
 			if routing.IsError(err, routing.ErrOutdated,
 				routing.ErrIgnored) {
@@ -901,10 +903,10 @@ func (d *AuthenticatedGossiper) synchronizeWithNode(syncReq *syncRequest) error 
 	// containing all the messages to be sent to the target peer.
 	var announceMessages []lnwire.Message
 
-	// As peers are expecting channel announcements before node announcements, we
-	// first retrieve the initial announcement, as well as the latest channel
-	// update announcement for both of the directed infos that make up each
-	// channel, and queue these to be sent to the peer.
+	// As peers are expecting channel announcements before node
+	// announcements, we first retrieve the initial announcement, as well as
+	// the latest channel update announcement for both of the directed edges
+	// that make up each channel, and queue these to be sent to the peer.
 	var numEdges uint32
 	if err := d.cfg.Router.ForEachChannel(func(chanInfo *channeldb.ChannelEdgeInfo,
 		e1, e2 *channeldb.ChannelEdgePolicy) error {
@@ -936,9 +938,8 @@ func (d *AuthenticatedGossiper) synchronizeWithNode(syncReq *syncRequest) error 
 	// for the announcement we originally retrieved.
 	var numNodes uint32
 	if err := d.cfg.Router.ForEachNode(func(node *channeldb.LightningNode) error {
-		// If this is a partial node, we don't have the data needed to create a
-		// node announcement
-		if node.LastUpdate.Unix() == 0 {
+		// If this is a node we never received a node announcement for, we skip it.
+		if !node.HaveNodeAnnouncement {
 			return nil
 		}
 		ann := &lnwire.NodeAnnouncement{
