@@ -130,6 +130,16 @@ func lndMain() error {
 				pubKey, msg,
 			)
 		},
+		SignNodeAnnouncement: func(nodeAnn *lnwire.NodeAnnouncement) (*btcec.Signature, error) {
+			sig, err := discovery.SignAnnouncement(nodeSigner,
+				server.identityPriv.PubKey(),
+				nodeAnn,
+			)
+			if err != nil {
+				return nil, err
+			}
+			return sig, nil
+		},
 		SendAnnouncement: func(msg lnwire.Message) error {
 			server.discoverSrv.ProcessLocalAnnouncement(msg,
 				idPrivKey.PubKey())
@@ -158,16 +168,6 @@ func lndMain() error {
 			return nil, fmt.Errorf("unable to find channel")
 		},
 		DefaultRoutingPolicy: activeChainControl.routingPolicy,
-		SignNodeAnnouncement: func(nodeAnn *lnwire.NodeAnnouncement) (*btcec.Signature, error) {
-			sig, err := discovery.SignAnnouncement(nodeSigner,
-				server.identityPriv.PubKey(),
-				nodeAnn,
-			)
-			if err != nil {
-				return nil, err
-			}
-			return sig, nil
-		},
 	})
 	if err != nil {
 		return err

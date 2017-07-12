@@ -152,6 +152,10 @@ type fundingConfig struct {
 	// cannot be located, then an error is returned.
 	SignMessage func(pubKey *btcec.PublicKey, msg []byte) (*btcec.Signature, error)
 
+	// SignNodeAnnouncement is used by the fundingManager to sign the
+	// updated self node announcements sent after each channel announcement.
+	SignNodeAnnouncement func(nodeAnn *lnwire.NodeAnnouncement) (*btcec.Signature, error)
+
 	// SendAnnouncement is used by the FundingManager to announce newly
 	// created channels to the rest of the Lightning Network.
 	SendAnnouncement func(msg lnwire.Message) error
@@ -177,8 +181,6 @@ type fundingConfig struct {
 	// DefaultRoutingPolicy is the default routing policy used when
 	// initially announcing channels.
 	DefaultRoutingPolicy htlcswitch.ForwardingPolicy
-
-	SignNodeAnnouncement func(nodeAnn *lnwire.NodeAnnouncement) (*btcec.Signature, error)
 }
 
 // fundingManager acts as an orchestrator/bridge between the wallet's
@@ -1261,9 +1263,10 @@ func (f *fundingManager) announceChannel(localIDKey, remoteIDKey, localFundingKe
 		return
 	}
 
-	// TODO: Not use time.Now()?
+	// Create node announcement with updated timestamp to make sure it gets
+	// propagated in the network, in particular by our local announcement
+	// process logic.
 	nodeAnn := &lnwire.NodeAnnouncement{
-		// Signature: self.AuthSig,
 		Timestamp: uint32(time.Now().Unix()),
 		Addresses: self.Addresses,
 		NodeID:    self.PubKey,
@@ -1271,15 +1274,16 @@ func (f *fundingManager) announceChannel(localIDKey, remoteIDKey, localFundingKe
 		Features:  self.Features,
 	}
 
+	// Since the timestamp is changed, we cannot reuse the old signature
+	// and must re-sign the announcement.
 	sign, err := f.cfg.SignNodeAnnouncement(nodeAnn)
 	if err != nil {
-		fndgLog.Errorf("unable to generate signature for "+
-			"self node announcement: %v", err)
+		fndgLog.Errorf("unable to generate signature for self node "+
+			"announcement: %v", err)
 		return
 	}
 
 	nodeAnn.Signature = sign
-
 	f.cfg.SendAnnouncement(nodeAnn)
 }
 

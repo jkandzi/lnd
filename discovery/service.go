@@ -542,8 +542,8 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(nMsg *networkMsg) []l
 
 		// We will add the edge to the channel router. If the nodes
 		// present in this channel are not present in the database, a
-		// partial node will/ be added to represent it while we wait
-		// for a node announcement.
+		// partial node will be added to represent each node while we
+		// wait for a node announcement.
 		if err := d.cfg.Router.AddEdge(edge); err != nil {
 			if routing.IsError(err, routing.ErrOutdated,
 				routing.ErrIgnored) {
@@ -934,11 +934,12 @@ func (d *AuthenticatedGossiper) synchronizeWithNode(syncReq *syncRequest) error 
 		return err
 	}
 
-	// Then run through all the vertexes in the graph, retrieving the data
-	// for the announcement we originally retrieved.
+	// Run through all the vertexes in the graph, retrieving the data for
+	// the node announcements we originally retrieved.
 	var numNodes uint32
 	if err := d.cfg.Router.ForEachNode(func(node *channeldb.LightningNode) error {
-		// If this is a node we never received a node announcement for, we skip it.
+		// If this is a node we never received a node announcement for,
+		// we skip it.
 		if !node.HaveNodeAnnouncement {
 			return nil
 		}

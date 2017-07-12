@@ -2466,6 +2466,7 @@ func testNodeAnnouncement(net *networkHarness, t *harnessTest) {
 			"graph: %v", ipAddresses)
 	}
 
+	// Close the channel between Bob and Dave.
 	closeChannelAndAssert(ctxt, t, net, net.Bob, chanPoint, false)
 
 	if err := dave.Shutdown(); err != nil {

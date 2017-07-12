@@ -328,7 +328,7 @@ func (c *ChannelGraph) SetSourceNode(node *LightningNode) error {
 	})
 }
 
-// AddLightningNode adds a vertex/node to the graph database. If the node is
+// AddLightningNode adds a vertex/node to the graph database. If the node is not
 // in the database from before, this will add a new, unconnected one to the
 // graph. If it is present from before, this will update that node's
 // information. Note that this method is expected to only be called to update
@@ -858,9 +858,9 @@ type LightningNode struct {
 	// used to authenticated any advertisements/updates sent by the node.
 	PubKey *btcec.PublicKey
 
-	// HaveNodeAnnouncement indicates whether we received a node annoucement for
-	// this particular node. If true, the remainding fiels will be set, if false
-	// only the PubKey is known for this node.
+	// HaveNodeAnnouncement indicates whether we received a node annoucement
+	// for this particular node. If true, the remaining fiels will be set,
+	// if false only the PubKey is known for this node.
 	HaveNodeAnnouncement bool
 
 	// LastUpdate is the last time the vertex information for this node has
@@ -1408,10 +1408,10 @@ func putLightningNode(nodeBucket *bolt.Bucket, aliasBucket *bolt.Bucket, node *L
 		return err
 	}
 
-	// If we got a node announcement for this node, we will have the rest of the
-	// data available. If not we don't have more data to write.
+	// If we got a node announcement for this node, we will have the rest of
+	// the data available. If not we don't have more data to write.
 	if !node.HaveNodeAnnouncement {
-		// set HaveNodeAnnouncement=0
+		// Write HaveNodeAnnouncement=0.
 		byteOrder.PutUint16(scratch[:2], 0)
 		if _, err := b.Write(scratch[:2]); err != nil {
 			return err
@@ -1420,7 +1420,7 @@ func putLightningNode(nodeBucket *bolt.Bucket, aliasBucket *bolt.Bucket, node *L
 		return nodeBucket.Put(nodePub, b.Bytes())
 	}
 
-	// set HaveNodeAnnouncement=1
+	// Write HaveNodeAnnouncement=1.
 	byteOrder.PutUint16(scratch[:2], 1)
 	if _, err := b.Write(scratch[:2]); err != nil {
 		return err
@@ -1542,12 +1542,9 @@ func deserializeLightningNode(r io.Reader) (*LightningNode, error) {
 		return node, nil
 	}
 
-	// The rest of the data is optional, so the next read might fail with EOF. In
-	// that case we return the partially constructed node.
-	err = binary.Read(r, byteOrder, &node.Color.R)
-	if err == io.EOF {
-		return node, nil
-	} else if err != nil {
+	// We did get a node announcement for this node, so we'll have the rest
+	// of the data available.
+	if err := binary.Read(r, byteOrder, &node.Color.R); err != nil {
 		return nil, err
 	}
 	if err := binary.Read(r, byteOrder, &node.Color.G); err != nil {

@@ -281,7 +281,8 @@ func TestIgnoreNodeAnnouncement(t *testing.T) {
 	t.Parallel()
 
 	const startingBlockHeight = 101
-	ctx, cleanUp, err := createTestCtx(startingBlockHeight, basicGraphFilePath)
+	ctx, cleanUp, err := createTestCtx(startingBlockHeight,
+		basicGraphFilePath)
 	defer cleanUp()
 	if err != nil {
 		t.Fatalf("unable to create router: %v", err)
@@ -312,7 +313,8 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 	t.Parallel()
 
 	const startingBlockHeight = 101
-	ctx, cleanUp, err := createTestCtx(startingBlockHeight, basicGraphFilePath)
+	ctx, cleanUp, err := createTestCtx(startingBlockHeight,
+		basicGraphFilePath)
 	defer cleanUp()
 	if err != nil {
 		t.Fatalf("unable to create router: %v", err)
@@ -334,11 +336,11 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 		t.Fatalf("node already existed")
 	}
 
-	// Add the edge between the two unknown nodes to the graph, and check that
-	// the nodes are found after the fact.
+	// Add the edge between the two unknown nodes to the graph, and check
+	// that the nodes are found after the fact.
 	fundingTx, _, chanID, err := createChannelEdge(ctx,
-		bitcoinKey1.SerializeCompressed(), bitcoinKey2.SerializeCompressed(),
-		10000, 500)
+		bitcoinKey1.SerializeCompressed(),
+		bitcoinKey2.SerializeCompressed(), 10000, 500)
 	if err != nil {
 		t.Fatalf("unable to create channel edge: %v", err)
 	}
@@ -356,11 +358,12 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 		AuthProof:   nil,
 	}
 	if err := ctx.router.AddEdge(edge); err != nil {
-		t.Fatalf("expected to be able to add edge to the channel graph, "+
-			"even though the vertexes were unknown: %v.", err)
+		t.Fatalf("expected to be able to add edge to the channel graph,"+
+			" even though the vertexes were unknown: %v.", err)
 	}
 
-	// We must add the edge policy to be able to use the edge for route finding.
+	// We must add the edge policy to be able to use the edge for route
+	// finding.
 	edgePolicy := &channeldb.ChannelEdgePolicy{
 		Signature:                 testSig,
 		ChannelID:                 edge.ChannelID,
@@ -383,8 +386,8 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 		t.Fatalf("unable to update edge policy: %v", err)
 	}
 
-	// After adding the edge between the two previously unknown nodes, they should
-	// have been added to the graph.
+	// After adding the edge between the two previously unknown nodes, they
+	// should have been added to the graph.
 	_, exists1, err = ctx.graph.HasLightningNode(priv1.PubKey())
 	if err != nil {
 		t.Fatalf("unable to query graph: %v", err)
@@ -400,8 +403,9 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 		t.Fatalf("node2 was not added to the graph")
 	}
 
-	// We will connect node1 to the rest of the test graph, and make sure we can
-	// find a route to node2, which will use the just added channel edge.
+	// We will connect node1 to the rest of the test graph, and make sure
+	// we can find a route to node2, which will use the just added channel
+	// edge.
 
 	// We will connect node 1 to "sophon"
 	connectNode := ctx.aliases["sophon"]
@@ -478,8 +482,8 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 		t.Fatalf("expected to find 1 route, found: %v", len(routes))
 	}
 
-	// Now check that we can update the node info for the partial node without
-	// messing up the channel graph.
+	// Now check that we can update the node info for the partial node
+	// without messing up the channel graph.
 	n1 := &channeldb.LightningNode{
 		HaveNodeAnnouncement: true,
 		LastUpdate:           time.Unix(123, 0),
@@ -510,7 +514,8 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 		t.Fatalf("could not add node: %v", err)
 	}
 
-	// Should still be able to find the route, and the info should be updated.
+	// Should still be able to find the route, and the info should be
+	// updated.
 	routes, err = ctx.router.FindRoutes(targetNode, paymentAmt)
 	if err != nil {
 		t.Fatalf("unable to find any routes: %v", err)

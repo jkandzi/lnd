@@ -26,9 +26,9 @@ import (
 // and applying edges updates, return the current block with with out
 // topology is synchronized.
 type ChannelGraphSource interface {
-	// AddNode is used to add information about a node to the router database. If
-	// the node with this pubkey is not present in an existing channel, it will
-	// be ignored.
+	// AddNode is used to add information about a node to the router
+	// database. If the node with this pubkey is not present in an existing
+	// channel, it will be ignored.
 	AddNode(node *channeldb.LightningNode) error
 
 	// AddEdge is used to add edge/channel to the topology of the router,
@@ -523,18 +523,20 @@ func (r *ChannelRouter) processUpdate(msg interface{}) error {
 
 	switch msg := msg.(type) {
 	case *channeldb.LightningNode:
-		// If we are not already aware of this node, it means that we don't know
-		// about any channel using this node. To avoid a DoS attack by node
-		// announcements, we will ignore such nodes. If we do know about this node,
-		// check that this update brings info newer than what we already have.
+		// If we are not already aware of this node, it means that we
+		// don't know about any channel using this node. To avoid a DoS
+		// attack by node announcements, we will ignore such nodes. If
+		// we do know about this node, check that this update brings
+		// info newer than what we already have.
 		lastUpdate, exists, err := r.cfg.Graph.HasLightningNode(msg.PubKey)
 		if err != nil {
 			return errors.Errorf("unable to query for the "+
 				"existence of node: %v", err)
 		}
 		if !exists {
-			return newErrf(ErrIgnored, "Ignoring node announcement for node not found "+
-				"in channel graph (%x)", msg.PubKey.SerializeCompressed())
+			return newErrf(ErrIgnored, "Ignoring node announcement"+
+				" for node not found in channel graph (%x)",
+				msg.PubKey.SerializeCompressed())
 		}
 
 		// If we've reached this point then we're aware of the vertex
@@ -568,18 +570,20 @@ func (r *ChannelRouter) processUpdate(msg interface{}) error {
 				"chan_id=%v", msg.ChannelID)
 		}
 
-		// Query the database for the existence of the two nodes in this channel.
-		// If not found, add a partial node to the database, containing only the
-		// node keys.
+		// Query the database for the existence of the two nodes in this
+		// channel. If not found, add a partial node to the database,
+		// containing only the node keys.
 		_, exists, _ = r.cfg.Graph.HasLightningNode(msg.NodeKey1)
 		if !exists {
 			node1 := &channeldb.LightningNode{
 				PubKey:               msg.NodeKey1,
 				HaveNodeAnnouncement: false,
 			}
-			if err := r.cfg.Graph.AddLightningNode(node1); err != nil {
-				return errors.Errorf("unable to add node %v to the "+
-					"graph: %v", node1.PubKey.SerializeCompressed(), err)
+			err := r.cfg.Graph.AddLightningNode(node1)
+			if err != nil {
+				return errors.Errorf("unable to add node %v to"+
+					" the graph: %v",
+					node1.PubKey.SerializeCompressed(), err)
 			}
 		}
 		_, exists, _ = r.cfg.Graph.HasLightningNode(msg.NodeKey2)
@@ -588,9 +592,11 @@ func (r *ChannelRouter) processUpdate(msg interface{}) error {
 				PubKey:               msg.NodeKey2,
 				HaveNodeAnnouncement: false,
 			}
-			if err := r.cfg.Graph.AddLightningNode(node2); err != nil {
-				return errors.Errorf("unable to add node %v to the "+
-					"graph: %v", node2.PubKey.SerializeCompressed(), err)
+			err := r.cfg.Graph.AddLightningNode(node2)
+			if err != nil {
+				return errors.Errorf("unable to add node %v to"+
+					" the graph: %v",
+					node2.PubKey.SerializeCompressed(), err)
 			}
 		}
 

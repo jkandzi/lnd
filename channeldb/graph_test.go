@@ -127,6 +127,8 @@ func TestNodeInsertionAndDeletion(t *testing.T) {
 	}
 }
 
+// TestPartialNode checks that we can add and retrieve a LightningNode where
+// where only the pubkey is known to the database.
 func TestPartialNode(t *testing.T) {
 	t.Parallel()
 
@@ -164,11 +166,12 @@ func TestPartialNode(t *testing.T) {
 	}
 
 	// The two nodes should match exactly! (with default values for
-	// LastUpdate and db)
+	// LastUpdate and db set to satisfy compareNodes())
 	node = &LightningNode{
-		LastUpdate: time.Unix(0, 0),
-		PubKey:     testPub,
-		db:         db,
+		PubKey:               testPub,
+		HaveNodeAnnouncement: false,
+		LastUpdate:           time.Unix(0, 0),
+		db:                   db,
 	}
 
 	if err := compareNodes(node, dbNode); err != nil {

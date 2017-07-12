@@ -430,11 +430,12 @@ func TestNodeUpdateNotification(t *testing.T) {
 		t.Fatalf("unable to create router: %v", err)
 	}
 
-	// We only accept node announcements from nodes having a known channel, so
-	// create one now.
+	// We only accept node announcements from nodes having a known channel,
+	// so create one now.
 	const chanValue = 10000
 	fundingTx, _, chanID, err := createChannelEdge(ctx,
-		bitcoinKey1.SerializeCompressed(), bitcoinKey2.SerializeCompressed(),
+		bitcoinKey1.SerializeCompressed(),
+		bitcoinKey2.SerializeCompressed(),
 		chanValue, startingBlockHeight)
 	if err != nil {
 		t.Fatalf("unable create channel edge: %v", err)
@@ -447,8 +448,9 @@ func TestNodeUpdateNotification(t *testing.T) {
 	}
 	ctx.chain.addBlock(fundingBlock, chanID.BlockHeight)
 
-	// Create two random nodes to add to send as node announcement messages
-	// to trigger notifications.
+	// Create two nodes acting as endpoints in the created channel, and use
+	// them to trigger notifications by sending updated node announcement
+	// messages.
 	node1, err := createTestNode()
 	if err != nil {
 		t.Fatalf("unable to create test node: %v", err)
@@ -471,6 +473,9 @@ func TestNodeUpdateNotification(t *testing.T) {
 			BitcoinSig2: testSig,
 		},
 	}
+
+	// Adding the edge will add the nodes to the graph, but with no info
+	// except the pubkey known.
 	if err := ctx.router.AddEdge(edge); err != nil {
 		t.Fatalf("unable to add edge: %v", err)
 	}
@@ -481,7 +486,8 @@ func TestNodeUpdateNotification(t *testing.T) {
 		t.Fatalf("unable to subscribe for channel notifications: %v", err)
 	}
 
-	// Change network topology by adding nodes to the channel router.
+	// Change network topology by adding the updated info for the two nodes
+	// to the channel router.
 	if err := ctx.router.AddNode(node1); err != nil {
 		t.Fatalf("unable to add node: %v", err)
 	}
@@ -574,7 +580,8 @@ func TestNotificationCancellation(t *testing.T) {
 	// We'll create the utxo for a new channel.
 	const chanValue = 10000
 	fundingTx, _, chanID, err := createChannelEdge(ctx,
-		bitcoinKey1.SerializeCompressed(), bitcoinKey2.SerializeCompressed(),
+		bitcoinKey1.SerializeCompressed(),
+		bitcoinKey2.SerializeCompressed(),
 		chanValue, startingBlockHeight)
 	if err != nil {
 		t.Fatalf("unable create channel edge: %v", err)
@@ -600,8 +607,8 @@ func TestNotificationCancellation(t *testing.T) {
 
 	// Before we send the message to the channel router, we'll cancel the
 	// notifications for this client. As a result, the notification
-	// triggered by accepting the edge and channel announcements shouldn't be
-	// sent to the client.
+	// triggered by accepting the channel announcements shouldn't be sent
+	// to the client.
 	ntfnClient.Cancel()
 
 	edge := &channeldb.ChannelEdgeInfo{
