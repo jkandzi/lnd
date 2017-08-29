@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/roasbeef/btcd/btcec"
@@ -147,7 +148,7 @@ type Invoice struct {
 
 	// Expiry specifies the timespan this invoice will be valid.
 	// Optional. If not set, a default expiry of 60 min will be implied.
-	Expiry *uint64
+	Expiry *time.Time
 
 	// FallbackAddr is an on-chain address that can be used for payment in
 	// case the Lightning payment fails.
@@ -206,7 +207,7 @@ func DescriptionHash(descriptionHash [32]byte) func(*Invoice) {
 // Expiry is a functional option that allows callers of NewInvoice to set the
 // expiry of the created Invoice. If not set, a default expiry of 60 min will
 // be implied.
-func Expiry(expiry uint64) func(*Invoice) {
+func Expiry(expiry time.Time) func(*Invoice) {
 	return func(i *Invoice) {
 		i.Expiry = &expiry
 	}
@@ -643,7 +644,8 @@ func parseTaggedFields(invoice *Invoice, fields []byte, net *chaincfg.Params) er
 			if err != nil {
 				return err
 			}
-			invoice.Expiry = &exp
+			unix := time.Unix(int64(exp), 0)
+			invoice.Expiry = &unix
 		case fieldTypeF:
 			if invoice.FallbackAddr != nil {
 				// We skip the field if we have already seen a
@@ -786,7 +788,8 @@ func writeTaggedFields(bufferBase32 *bytes.Buffer, invoice *Invoice) error {
 	}
 
 	if invoice.Expiry != nil {
-		expiry := uint64ToBase32(*invoice.Expiry)
+		unix := invoice.Expiry.Unix()
+		expiry := uint64ToBase32(uint64(unix))
 		writeTaggedField(bufferBase32, fieldTypeX, expiry)
 	}
 

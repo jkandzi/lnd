@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/roasbeef/btcd/btcec"
@@ -27,7 +28,7 @@ var (
 	testMillisat2500uBTC = lnwire.MilliSatoshi(250000000)
 	testMillisat20mBTC   = lnwire.MilliSatoshi(2000000000)
 
-	testExpiry60             = uint64(60)
+	testExpiry60             = time.Unix(60, 0)
 	testEmptyString          = ""
 	testCupOfCoffee          = "1 cup coffee"
 	testPleaseConsider       = "Please consider supporting this project"
