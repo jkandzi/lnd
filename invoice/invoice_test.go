@@ -9,6 +9,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcutil"
+	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 )
@@ -22,9 +23,9 @@ var (
 	testRoutingInfoPubkeyBytes2, _ = hex.DecodeString("039e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255")
 	testRoutingInfoPubkey2, _      = btcec.ParsePubKey(testRoutingInfoPubkeyBytes2, btcec.S256())
 
-	testMillisat24BTC    = uint64(2400000000000)
-	testMillisat2500uBTC = uint64(250000000)
-	testMillisat20mBTC   = uint64(2000000000)
+	testMillisat24BTC    = lnwire.MilliSatoshi(2400000000000)
+	testMillisat2500uBTC = lnwire.MilliSatoshi(250000000)
+	testMillisat20mBTC   = lnwire.MilliSatoshi(2000000000)
 
 	testExpiry60             = uint64(60)
 	testEmptyString          = ""
@@ -97,7 +98,7 @@ func TestDecodeAmount(t *testing.T) {
 	tests := []struct {
 		amount string
 		valid  bool
-		result uint64
+		result lnwire.MilliSatoshi
 	}{
 		{
 			amount: "",
@@ -217,7 +218,7 @@ func TestEncodeAmount(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		msat   uint64
+		msat   lnwire.MilliSatoshi
 		valid  bool
 		result string
 	}{

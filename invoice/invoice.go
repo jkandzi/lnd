@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	mSatPerBtc = uint64(100000000000)
+	mSatPerBtc = lnwire.MilliSatoshi(100000000000)
 
 	// The following byte values correspond to the supported field types.
 	// The field name is the character representing that 5-bit value in the
@@ -48,17 +48,17 @@ var (
 
 	// unitToMsat is a map from a unit to a function that converts an amount
 	// of that unit to millisatoshis.
-	unitToMsat = map[byte]func(uint64) (uint64, error){
-		'm': func(am uint64) (uint64, error) {
-			return am * 100000000, nil
+	unitToMsat = map[byte]func(uint64) (lnwire.MilliSatoshi, error){
+		'm': func(am uint64) (lnwire.MilliSatoshi, error) {
+			return lnwire.MilliSatoshi(am * 100000000), nil
 		},
-		'u': func(am uint64) (uint64, error) {
-			return am * 100000, nil
+		'u': func(am uint64) (lnwire.MilliSatoshi, error) {
+			return lnwire.MilliSatoshi(am * 100000), nil
 		},
-		'n': func(am uint64) (uint64, error) {
-			return am * 100, nil
+		'n': func(am uint64) (lnwire.MilliSatoshi, error) {
+			return lnwire.MilliSatoshi(am * 100), nil
 		},
-		'p': func(am uint64) (uint64, error) {
+		'p': func(am uint64) (lnwire.MilliSatoshi, error) {
 			if am < 10 {
 				return 0, fmt.Errorf("minimum amount is 10p")
 			}
@@ -66,36 +66,36 @@ var (
 				return 0, fmt.Errorf("amount not expressible " +
 					"in msat")
 			}
-			return am / 10, nil
+			return lnwire.MilliSatoshi(am / 10), nil
 		},
 	}
 
 	// msatToUnit is a map from a unit to a function that converts an amount
 	// in millisatoshis to an amount of that unit.
-	msatToUnit = map[byte]func(uint64) (uint64, error){
-		'm': func(am uint64) (uint64, error) {
+	msatToUnit = map[byte]func(lnwire.MilliSatoshi) (uint64, error){
+		'm': func(am lnwire.MilliSatoshi) (uint64, error) {
 			if am%100000000 != 0 {
 				return 0, fmt.Errorf("%d msat not expressible "+
 					"in mBTC", am)
 			}
-			return am / 100000000, nil
+			return uint64(am / 100000000), nil
 		},
-		'u': func(am uint64) (uint64, error) {
+		'u': func(am lnwire.MilliSatoshi) (uint64, error) {
 			if am%100000 != 0 {
 				return 0, fmt.Errorf("%d msat not expressible "+
 					"in uBTC", am)
 			}
-			return am / 100000, nil
+			return uint64(am / 100000), nil
 		},
-		'n': func(am uint64) (uint64, error) {
+		'n': func(am lnwire.MilliSatoshi) (uint64, error) {
 			if am%100 != 0 {
 				return 0, fmt.Errorf("%d msat not expressible "+
 					"in nBTC", am)
 			}
-			return am / 100, nil
+			return uint64(am / 100), nil
 		},
-		'p': func(am uint64) (uint64, error) {
-			return am * 10, nil
+		'p': func(am lnwire.MilliSatoshi) (uint64, error) {
+			return uint64(am * 10), nil
 		},
 	}
 )
@@ -119,9 +119,9 @@ type Invoice struct {
 	// Net specifies what network this Lightning invoice is meant for.
 	Net *chaincfg.Params
 
-	// MilliSat specifies the amount of this invoice in milli-satoshi.
+	// MilliSat specifies the amount of this invoice in millisatoshi.
 	// Optional.
-	MilliSat *uint64
+	MilliSat *lnwire.MilliSatoshi
 
 	// Timestamp specifies the time this invoice was created.
 	Timestamp uint64 // Mandatory
@@ -174,7 +174,7 @@ type ExtraRoutingInfo struct {
 
 // Amount is a functional option that allows callers of NewInvoice to set the
 // amount in millisatoshis that the Invoice should encode.
-func Amount(milliSat uint64) func(*Invoice) {
+func Amount(milliSat lnwire.MilliSatoshi) func(*Invoice) {
 	return func(i *Invoice) {
 		i.MilliSat = &milliSat
 	}
@@ -878,7 +878,7 @@ func writeTaggedField(bufferBase32 *bytes.Buffer, dataType byte, data []byte) er
 
 // decodeAmount returns the amount encoded by the provided string in
 // milllisatoshi.
-func decodeAmount(amount string) (uint64, error) {
+func decodeAmount(amount string) (lnwire.MilliSatoshi, error) {
 	if len(amount) < 1 {
 		return 0, fmt.Errorf("amount must be non-empty")
 	}
@@ -892,7 +892,7 @@ func decodeAmount(amount string) (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
-		return btc * mSatPerBtc, nil
+		return lnwire.MilliSatoshi(btc) * mSatPerBtc, nil
 	}
 
 	// If not a digit, it must be part of the known units.
@@ -917,11 +917,11 @@ func decodeAmount(amount string) (uint64, error) {
 
 // encodeAmount encodes the provided millisatoshi amount using as few characters
 // as possible.
-func encodeAmount(msat uint64) (string, error) {
-	// If possible to express in BTC, that will always be the shorted
+func encodeAmount(msat lnwire.MilliSatoshi) (string, error) {
+	// If possible to express in BTC, that will always be the shortest
 	// representation.
 	if msat%mSatPerBtc == 0 {
-		return strconv.FormatUint(msat/mSatPerBtc, 10), nil
+		return strconv.FormatInt(int64(msat/mSatPerBtc), 10), nil
 	}
 
 	// Should always be expressible in pico BTC.
