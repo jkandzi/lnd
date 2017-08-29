@@ -349,7 +349,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
-				Timestamp:       1496314658,
+				Timestamp:       time.Unix(1496314658, 0),
 				DescriptionHash: &testDescriptionHash,
 				Destination:     testPubKey,
 			},
@@ -361,7 +361,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
-				Timestamp:       1496314658,
+				Timestamp:       time.Unix(1496314658, 0),
 				PaymentHash:     &testPaymentHash,
 				Description:     &testPleaseConsider,
 				DescriptionHash: &testDescriptionHash,
@@ -375,7 +375,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:         &chaincfg.MainNetParams,
 				MilliSat:    &testMillisat20mBTC,
-				Timestamp:   1496314658,
+				Timestamp:   time.Unix(1496314658, 0),
 				PaymentHash: &testPaymentHash,
 				Destination: testPubKey,
 			},
@@ -387,7 +387,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:         &chaincfg.MainNetParams,
 				MilliSat:    &testMillisat20mBTC,
-				Timestamp:   1496314658,
+				Timestamp:   time.Unix(1496314658, 0),
 				PaymentHash: &testPaymentHash,
 				Description: &testPleaseConsider,
 				Destination: testPubKey,
@@ -401,7 +401,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
-				Timestamp:       1496314658,
+				Timestamp:       time.Unix(1496314658, 0),
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
 				Destination:     testPubKey,
@@ -415,7 +415,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat24BTC,
-				Timestamp:       1503429093,
+				Timestamp:       time.Unix(1503429093, 0),
 				PaymentHash:     &testPaymentHash,
 				Destination:     testPubKey,
 				DescriptionHash: &testDescriptionHash,
@@ -428,7 +428,7 @@ func TestDecodeEncode(t *testing.T) {
 			valid:          true,
 			decodedInvoice: &Invoice{
 				Net:         &chaincfg.MainNetParams,
-				Timestamp:   1496314658,
+				Timestamp:   time.Unix(1496314658, 0),
 				PaymentHash: &testPaymentHash,
 				Description: &testPleaseConsider,
 				Destination: testPubKey,
@@ -447,7 +447,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:         &chaincfg.MainNetParams,
 				MilliSat:    &testMillisat24BTC,
-				Timestamp:   1503429093,
+				Timestamp:   time.Unix(1503429093, 0),
 				PaymentHash: &testPaymentHash,
 				Destination: testPubKey,
 				Description: &testEmptyString,
@@ -460,7 +460,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:         &chaincfg.MainNetParams,
 				MilliSat:    &testMillisat2500uBTC,
-				Timestamp:   1496314658,
+				Timestamp:   time.Unix(1496314658, 0),
 				PaymentHash: &testPaymentHash,
 				Description: &testCupOfCoffee,
 				Destination: testPubKey,
@@ -480,7 +480,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
-				Timestamp:       1496314658,
+				Timestamp:       time.Unix(1496314658, 0),
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
 				Destination:     testPubKey,
@@ -499,7 +499,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:             &chaincfg.TestNet3Params,
 				MilliSat:        &testMillisat20mBTC,
-				Timestamp:       1496314658,
+				Timestamp:       time.Unix(1496314658, 0),
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
 				Destination:     testPubKey,
@@ -519,7 +519,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
-				Timestamp:       1496314658,
+				Timestamp:       time.Unix(1496314658, 0),
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
 				Destination:     testPubKey,
@@ -547,7 +547,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
-				Timestamp:       1496314658,
+				Timestamp:       time.Unix(1496314658, 0),
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
 				Destination:     testPubKey,
@@ -581,7 +581,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
-				Timestamp:       1496314658,
+				Timestamp:       time.Unix(1496314658, 0),
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
 				Destination:     testPubKey,
@@ -601,7 +601,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
-				Timestamp:       1496314658,
+				Timestamp:       time.Unix(1496314658, 0),
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
 				Destination:     testPubKey,
@@ -621,7 +621,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
-				Timestamp:       1496314658,
+				Timestamp:       time.Unix(1496314658, 0),
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
 				Destination:     testPubKey,
@@ -682,26 +682,25 @@ func TestNewInvoice(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		newInvoice     func() *Invoice
+		newInvoice     func() (*Invoice, error)
 		encodedInvoice string
 		valid          bool
 	}{
 		{
 			// Both Description and DescriptionHash set.
-			newInvoice: func() *Invoice {
-				invoice := NewInvoice(&chaincfg.MainNetParams,
-					testPaymentHash, 1496314658,
+			newInvoice: func() (*Invoice, error) {
+				return NewInvoice(&chaincfg.MainNetParams,
+					testPaymentHash, time.Unix(1496314658, 0),
 					DescriptionHash(testDescriptionHash),
 					Description(testPleaseConsider))
-				return invoice
 			},
 			valid: false, // Both Description and DescriptionHash set.
 		},
 		{
 			// 'n' field set.
-			newInvoice: func() *Invoice {
+			newInvoice: func() (*Invoice, error) {
 				return NewInvoice(&chaincfg.MainNetParams,
-					testPaymentHash, 1503429093,
+					testPaymentHash, time.Unix(1503429093, 0),
 					Amount(testMillisat24BTC),
 					Description(testEmptyString),
 					Destination(testPubKey))
@@ -711,9 +710,9 @@ func TestNewInvoice(t *testing.T) {
 		},
 		{
 			// On mainnet, with fallback address 1RustyRX2oai4EYYDpQGWvEL62BBGqN9T with extra routing info to go via nodes 029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255 then 039e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255
-			newInvoice: func() *Invoice {
+			newInvoice: func() (*Invoice, error) {
 				return NewInvoice(&chaincfg.MainNetParams,
-					testPaymentHash, 1496314658,
+					testPaymentHash, time.Unix(1496314658, 0),
 					Amount(testMillisat20mBTC),
 					DescriptionHash(testDescriptionHash),
 					FallbackAddr(testRustyAddr),
@@ -742,7 +741,10 @@ func TestNewInvoice(t *testing.T) {
 
 	for i, test := range tests {
 
-		invoice := test.newInvoice()
+		invoice, err := test.newInvoice()
+		if err != nil && !test.valid {
+			continue
+		}
 		encoded, err := invoice.Encode(testMessageSigner)
 		if (err == nil) != test.valid {
 			t.Errorf("NewInvoice test %d failed: %v", i, err)

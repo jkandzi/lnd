@@ -124,7 +124,8 @@ type Invoice struct {
 	MilliSat *lnwire.MilliSatoshi
 
 	// Timestamp specifies the time this invoice was created.
-	Timestamp uint64 // Mandatory
+	// Mandatory
+	Timestamp time.Time
 
 	// PaymentHash is the payment hash to be used for a payment to this
 	// invoice.
@@ -164,9 +165,16 @@ type Invoice struct {
 // ExtraRoutingInfo holds the information needed to route a payment along one
 // private channel.
 type ExtraRoutingInfo struct {
-	PubKey       *btcec.PublicKey
-	ShortChanID  uint64
-	Fee          uint64
+	// PubKey is the public key of the node at the start of this channel.
+	PubKey *btcec.PublicKey
+
+	// ShortChanID is the channel ID of the channel.
+	ShortChanID uint64
+
+	// Fee is the fee required for routing along this channel.
+	Fee uint64
+
+	// CltvExpDelta is this channel's cltv expiry delta.
 	CltvExpDelta uint16
 }
 
@@ -236,7 +244,7 @@ func RoutingInfo(routingInfo []ExtraRoutingInfo) func(*Invoice) {
 // Note: Either Description  or DescriptionHash must be provided for the Invoice
 // to be considered valid.
 func NewInvoice(net *chaincfg.Params, paymentHash [32]byte,
-	timestamp uint64, options ...func(*Invoice)) *Invoice {
+	timestamp time.Time, options ...func(*Invoice)) (*Invoice, error) {
 
 	invoice := &Invoice{
 		Net:         net,
@@ -248,7 +256,11 @@ func NewInvoice(net *chaincfg.Params, paymentHash [32]byte,
 		option(invoice)
 	}
 
-	return invoice
+	if err := validateInvoice(invoice); err != nil {
+		return nil, err
+	}
+
+	return invoice, nil
 }
 
 // Decode parses the provided encoded invoice, and returns a decoded Invoice in
@@ -376,7 +388,7 @@ func (invoice *Invoice) Encode(signer MessageSigner) (string, error) {
 	var bufferBase32 bytes.Buffer
 
 	// The timestamp will be encoded using 35 bits, in base32.
-	timestampBase32 := uint64ToBase32(invoice.Timestamp)
+	timestampBase32 := uint64ToBase32(uint64(invoice.Timestamp.Unix()))
 
 	// The timestamp must be exactly 35 bits, which means 7 groups. If it
 	// can fit into fewer groups we add leading zero groups, if it is too
@@ -510,11 +522,11 @@ func parseData(invoice *Invoice, data []byte, net *chaincfg.Params) error {
 	}
 
 	// Timestamp: 35 bits, 7 groups.
-	var err error
-	invoice.Timestamp, err = base32ToUint64(data[:7])
+	t, err := base32ToUint64(data[:7])
 	if err != nil {
 		return err
 	}
+	invoice.Timestamp = time.Unix(int64(t), 0)
 
 	// The rest are tagged parts.
 	tagData := data[7:]
