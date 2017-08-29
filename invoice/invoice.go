@@ -16,7 +16,25 @@ import (
 )
 
 const (
-	mSatPerBtc = lnwire.MilliSatoshi(100000000000)
+	// mSatPerBtc is the number of millisatoshis in 1 BTC.
+	mSatPerBtc = 100000000000
+
+	// signatureBase32Len is the number of 5-bit groups needed to encode
+	// the 512 bit signature + 8 bit recovery ID.
+	signatureBase32Len = 104
+
+	// timestampBase32Len is the number of 5-bit groups needed to encode
+	// the 35-bit timestamp.
+	timestampBase32Len = 7
+
+	// hashBase32Len is the number of 5-bit groups needed to encode a
+	// 256-bit hash. Note that the last group will be padded with zeroes.
+	hashBase32Len = 52
+
+	// pubKeyBase32Len is the number of 5-bit groups needed to encode a
+	// 33-byte compressed pubkey. Note that the last group will be padded
+	// with zeroes.
+	pubKeyBase32Len = 53
 
 	// The following byte values correspond to the supported field types.
 	// The field name is the character representing that 5-bit value in the
@@ -318,7 +336,7 @@ func Decode(invoice string) (*Invoice, error) {
 
 	// Everything except the last 520 bits of the data encodes the invoice's
 	// timestamp and tagged fields.
-	invoiceData := data[:len(data)-104]
+	invoiceData := data[:len(data)-signatureBase32Len]
 
 	// Parse the timestamp and tagged fields, and fill the Invoice struct.
 	if err := parseData(&decodedInvoice, invoiceData, net); err != nil {
@@ -326,7 +344,7 @@ func Decode(invoice string) (*Invoice, error) {
 	}
 
 	// The last 520 bits (104 groups) make up the signature.
-	sigBase32 := data[len(data)-104:]
+	sigBase32 := data[len(data)-signatureBase32Len:]
 	sigBase256, err := bech32.ConvertBits(sigBase32, 5, 8, true)
 	if err != nil {
 		return nil, err
@@ -352,7 +370,11 @@ func Decode(invoice string) (*Invoice, error) {
 	// to verify the signature, if not do public key recovery.
 	if decodedInvoice.Destination != nil {
 		var signature *btcec.Signature
-		lnwire.DeserializeSigFromWire(&signature, sigBytes)
+		err := lnwire.DeserializeSigFromWire(&signature, sigBytes)
+		if err != nil {
+			return nil, fmt.Errorf("unable to deserialize "+
+				"signature: %v", err)
+		}
 		if !signature.Verify(hash, decodedInvoice.Destination) {
 			return nil, fmt.Errorf("invalid invoice signature")
 		}
@@ -393,15 +415,23 @@ func (invoice *Invoice) Encode(signer MessageSigner) (string, error) {
 	// The timestamp must be exactly 35 bits, which means 7 groups. If it
 	// can fit into fewer groups we add leading zero groups, if it is too
 	// big we fail early, as there is not possible to encode it.
-	if len(timestampBase32) > 7 {
-		return "", fmt.Errorf("timestamp too big: %d", invoice.Timestamp)
+	if len(timestampBase32) > timestampBase32Len {
+		return "", fmt.Errorf("timestamp too big: %d",
+			invoice.Timestamp.Unix())
 	}
 
-	// Add zero bytes to the first 7-len(timestampBase32) groups, then add
-	// the non-zero groups.
-	zeroes := make([]byte, 7-len(timestampBase32), 7-len(timestampBase32))
-	bufferBase32.Write(zeroes)
-	bufferBase32.Write(timestampBase32)
+	// Add zero bytes to the first timestampBase32Len-len(timestampBase32)
+	// groups, then add the non-zero groups.
+	zeroes := make([]byte, timestampBase32Len-len(timestampBase32),
+		timestampBase32Len-len(timestampBase32))
+	_, err := bufferBase32.Write(zeroes)
+	if err != nil {
+		return "", fmt.Errorf("unable to write to buffer: %v", err)
+	}
+	_, err = bufferBase32.Write(timestampBase32)
+	if err != nil {
+		return "", fmt.Errorf("unable to write to buffer: %v", err)
+	}
 
 	// We now write the tagged fields to the buffer, which will fill the
 	// rest of the data part before the signature.
@@ -448,7 +478,11 @@ func (invoice *Invoice) Encode(signer MessageSigner) (string, error) {
 	// used to create the signature.
 	if invoice.Destination != nil {
 		var signature *btcec.Signature
-		lnwire.DeserializeSigFromWire(&signature, sigBytes)
+		err = lnwire.DeserializeSigFromWire(&signature, sigBytes)
+		if err != nil {
+			return "", fmt.Errorf("unable to deserialize "+
+				"signature: %v", err)
+		}
 		valid := signature.Verify(hash, invoice.Destination)
 		if !valid {
 			return "", fmt.Errorf("signature does not match " +
@@ -493,6 +527,12 @@ func validateInvoice(invoice *Invoice) error {
 		return fmt.Errorf("neither description nor description hash set")
 	}
 
+	// Can have at most 20 extra hops for routing.
+	if len(invoice.RoutingInfo) > 20 {
+		return fmt.Errorf("too many extra hops: %d",
+			len(invoice.RoutingInfo))
+	}
+
 	// Check that we support the field lengths.
 	if len(invoice.PaymentHash) != 32 {
 		return fmt.Errorf("unsupported payment hash length: %d",
@@ -517,7 +557,7 @@ func validateInvoice(invoice *Invoice) error {
 // returned from the bech32.Decode method, except signature.
 func parseData(invoice *Invoice, data []byte, net *chaincfg.Params) error {
 	// It must contain the timestamp, encoded using 35 bits (7 groups).
-	if len(data) < 7 {
+	if len(data) < timestampBase32Len {
 		return fmt.Errorf("data too short: %d", len(data))
 	}
 
@@ -580,7 +620,7 @@ func parseTaggedFields(invoice *Invoice, fields []byte, net *chaincfg.Params) er
 				continue
 			}
 
-			if dataLength != 52 {
+			if dataLength != hashBase32Len {
 				// Skipping unknown field length.
 				continue
 			}
@@ -612,7 +652,7 @@ func parseTaggedFields(invoice *Invoice, fields []byte, net *chaincfg.Params) er
 				continue
 			}
 
-			if len(base32Data) != 53 {
+			if len(base32Data) != pubKeyBase32Len {
 				// Skip unknown length.
 				continue
 			}
@@ -634,7 +674,7 @@ func parseTaggedFields(invoice *Invoice, fields []byte, net *chaincfg.Params) er
 				continue
 			}
 
-			if len(base32Data) != 52 {
+			if len(base32Data) != hashBase32Len {
 				// Skip unknown length.
 				continue
 			}
@@ -763,7 +803,7 @@ func writeTaggedFields(bufferBase32 *bytes.Buffer, invoice *Invoice) error {
 		if err != nil {
 			return err
 		}
-		if len(base32) != 52 {
+		if len(base32) != hashBase32Len {
 			return fmt.Errorf("invalid payment hash length: %d",
 				len(invoice.PaymentHash))
 		}
@@ -780,7 +820,10 @@ func writeTaggedFields(bufferBase32 *bytes.Buffer, invoice *Invoice) error {
 		if err != nil {
 			return err
 		}
-		writeTaggedField(bufferBase32, fieldTypeD, base32)
+		err = writeTaggedField(bufferBase32, fieldTypeD, base32)
+		if err != nil {
+			return err
+		}
 	}
 
 	if invoice.DescriptionHash != nil {
@@ -791,18 +834,24 @@ func writeTaggedFields(bufferBase32 *bytes.Buffer, invoice *Invoice) error {
 			return err
 		}
 
-		if len(descBase32) != 52 {
+		if len(descBase32) != hashBase32Len {
 			return fmt.Errorf("invalid description hash length: %d",
 				len(invoice.DescriptionHash))
 		}
 
-		writeTaggedField(bufferBase32, fieldTypeH, descBase32)
+		err = writeTaggedField(bufferBase32, fieldTypeH, descBase32)
+		if err != nil {
+			return err
+		}
 	}
 
 	if invoice.Expiry != nil {
 		unix := invoice.Expiry.Unix()
 		expiry := uint64ToBase32(uint64(unix))
-		writeTaggedField(bufferBase32, fieldTypeX, expiry)
+		err := writeTaggedField(bufferBase32, fieldTypeX, expiry)
+		if err != nil {
+			return err
+		}
 	}
 
 	if invoice.FallbackAddr != nil {
@@ -825,8 +874,11 @@ func writeTaggedFields(bufferBase32 *bytes.Buffer, invoice *Invoice) error {
 			return err
 		}
 
-		writeTaggedField(bufferBase32, fieldTypeF,
+		err = writeTaggedField(bufferBase32, fieldTypeF,
 			append([]byte{version}, base32Addr...))
+		if err != nil {
+			return err
+		}
 	}
 
 	if len(invoice.RoutingInfo) > 0 {
@@ -846,7 +898,10 @@ func writeTaggedFields(bufferBase32 *bytes.Buffer, invoice *Invoice) error {
 			return err
 		}
 
-		writeTaggedField(bufferBase32, fieldTypeR, routingDataBase32)
+		err = writeTaggedField(bufferBase32, fieldTypeR, routingDataBase32)
+		if err != nil {
+			return err
+		}
 	}
 
 	if invoice.Destination != nil {
@@ -857,12 +912,15 @@ func writeTaggedFields(bufferBase32 *bytes.Buffer, invoice *Invoice) error {
 			return nil
 		}
 
-		if len(pubKeyBase32) != 53 {
+		if len(pubKeyBase32) != pubKeyBase32Len {
 			return fmt.Errorf("invalid pubkey length: %d",
 				len(invoice.Destination.SerializeCompressed()))
 		}
 
-		writeTaggedField(bufferBase32, fieldTypeN, pubKeyBase32)
+		err = writeTaggedField(bufferBase32, fieldTypeN, pubKeyBase32)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -884,9 +942,18 @@ func writeTaggedField(bufferBase32 *bytes.Buffer, dataType byte, data []byte) er
 			len(data))
 	}
 
-	bufferBase32.WriteByte(dataType)
-	bufferBase32.Write(lenBase32)
-	bufferBase32.Write(data)
+	err := bufferBase32.WriteByte(dataType)
+	if err != nil {
+		return fmt.Errorf("unable to write to buffer: %v", err)
+	}
+	_, err = bufferBase32.Write(lenBase32)
+	if err != nil {
+		return fmt.Errorf("unable to write to buffer: %v", err)
+	}
+	_, err = bufferBase32.Write(data)
+	if err != nil {
+		return fmt.Errorf("unable to write to buffer: %v", err)
+	}
 
 	return nil
 }
