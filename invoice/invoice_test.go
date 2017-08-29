@@ -36,8 +36,12 @@ var (
 	testAddrMainnetP2SH, _   = btcutil.DecodeAddress("3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX", &chaincfg.MainNetParams)
 	testAddrMainnetP2WPKH, _ = btcutil.DecodeAddress("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", &chaincfg.MainNetParams)
 	testAddrMainnetP2WSH, _  = btcutil.DecodeAddress("bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3", &chaincfg.MainNetParams)
-	testPaymentHash, _       = hex.DecodeString("0001020304050607080900010203040506070809000102030405060708090102")
-	testDescriptionHash      = chainhash.HashB([]byte("One piece of chocolate cake, one icecream cone, one pickle, one slice of swiss cheese, one slice of salami, one lollypop, one piece of cherry pie, one sausage, one cupcake, and one slice of watermelon"))
+	testPaymentHashSlice, _  = hex.DecodeString("0001020304050607080900010203040506070809000102030405060708090102")
+	testDescriptionHashSlice = chainhash.HashB([]byte("One piece of chocolate cake, one icecream cone, one pickle, one slice of swiss cheese, one slice of salami, one lollypop, one piece of cherry pie, one sausage, one cupcake, and one slice of watermelon"))
+
+	// Must be initialized in init().
+	testPaymentHash     [32]byte
+	testDescriptionHash [32]byte
 
 	testMessageSigner = MessageSigner{
 		SignCompact: func(hash []byte) ([]byte, error) {
@@ -51,6 +55,11 @@ var (
 		},
 	}
 )
+
+func init() {
+	copy(testPaymentHash[:], testPaymentHashSlice[:])
+	copy(testDescriptionHash[:], testDescriptionHashSlice[:])
+}
 
 // TestParseTimestamp checks that the 35 bit timestamp is properly parsed.
 func TestParseTimestamp(t *testing.T) {
@@ -336,11 +345,10 @@ func TestDecodeEncode(t *testing.T) {
 			encodedInvoice: "lnbc20m1pvjluezhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsjv38luh6p6s2xrv3mzvlmzaya43376h0twal5ax0k6p47498hp3hnaymzhsn424rxqjs0q7apn26yrhaxltq3vzwpqj9nc2r3kzwccsplnq470",
 			valid:          false,
 			decodedInvoice: &Invoice{
-				Net:       &chaincfg.MainNetParams,
-				MilliSat:  &testMillisat20mBTC,
-				Timestamp: 1496314658,
-				// PaymentHash:    testPaymentHash,
-				DescriptionHash: testDescriptionHash,
+				Net:             &chaincfg.MainNetParams,
+				MilliSat:        &testMillisat20mBTC,
+				Timestamp:       1496314658,
+				DescriptionHash: &testDescriptionHash,
 				RecoveredPubKey: testPubKey,
 			},
 		},
@@ -352,9 +360,9 @@ func TestDecodeEncode(t *testing.T) {
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       1496314658,
-				PaymentHash:     testPaymentHash,
+				PaymentHash:     &testPaymentHash,
 				Description:     &testPleaseConsider,
-				DescriptionHash: testDescriptionHash,
+				DescriptionHash: &testDescriptionHash,
 				RecoveredPubKey: testPubKey,
 			},
 		},
@@ -366,7 +374,7 @@ func TestDecodeEncode(t *testing.T) {
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       1496314658,
-				PaymentHash:     testPaymentHash,
+				PaymentHash:     &testPaymentHash,
 				RecoveredPubKey: testPubKey,
 			},
 		},
@@ -378,7 +386,7 @@ func TestDecodeEncode(t *testing.T) {
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       1496314658,
-				PaymentHash:     testPaymentHash,
+				PaymentHash:     &testPaymentHash,
 				Description:     &testPleaseConsider,
 				RecoveredPubKey: testPubKey,
 			},
@@ -392,8 +400,8 @@ func TestDecodeEncode(t *testing.T) {
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       1496314658,
-				PaymentHash:     testPaymentHash,
-				DescriptionHash: testDescriptionHash,
+				PaymentHash:     &testPaymentHash,
+				DescriptionHash: &testDescriptionHash,
 				RecoveredPubKey: testPubKey,
 			},
 			skipEncoding: true, // Skip encoding since we don't have the unknown fields to encode.
@@ -406,9 +414,9 @@ func TestDecodeEncode(t *testing.T) {
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat24BTC,
 				Timestamp:       1503429093,
-				PaymentHash:     testPaymentHash,
+				PaymentHash:     &testPaymentHash,
 				PubKey:          testPubKey,
-				DescriptionHash: testDescriptionHash,
+				DescriptionHash: &testDescriptionHash,
 			},
 			skipEncoding: true, // Skip encoding since we don't have the unknown fields to encode.
 		},
@@ -419,7 +427,7 @@ func TestDecodeEncode(t *testing.T) {
 			decodedInvoice: &Invoice{
 				Net:             &chaincfg.MainNetParams,
 				Timestamp:       1496314658,
-				PaymentHash:     testPaymentHash,
+				PaymentHash:     &testPaymentHash,
 				Description:     &testPleaseConsider,
 				RecoveredPubKey: testPubKey,
 			},
@@ -432,7 +440,7 @@ func TestDecodeEncode(t *testing.T) {
 				Net:         &chaincfg.MainNetParams,
 				MilliSat:    &testMillisat24BTC,
 				Timestamp:   1503429093,
-				PaymentHash: testPaymentHash,
+				PaymentHash: &testPaymentHash,
 				PubKey:      testPubKey,
 				Description: &testEmptyString,
 			},
@@ -445,7 +453,7 @@ func TestDecodeEncode(t *testing.T) {
 				Net:         &chaincfg.MainNetParams,
 				MilliSat:    &testMillisat2500uBTC,
 				Timestamp:   1496314658,
-				PaymentHash: testPaymentHash,
+				PaymentHash: &testPaymentHash,
 				Description: &testCupOfCoffee,
 				// PubKey:      testPubKey,
 				RecoveredPubKey: testPubKey,
@@ -460,8 +468,8 @@ func TestDecodeEncode(t *testing.T) {
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       1496314658,
-				PaymentHash:     testPaymentHash,
-				DescriptionHash: testDescriptionHash,
+				PaymentHash:     &testPaymentHash,
+				DescriptionHash: &testDescriptionHash,
 				RecoveredPubKey: testPubKey,
 			},
 		},
@@ -473,8 +481,8 @@ func TestDecodeEncode(t *testing.T) {
 				Net:             &chaincfg.TestNet3Params,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       1496314658,
-				PaymentHash:     testPaymentHash,
-				DescriptionHash: testDescriptionHash,
+				PaymentHash:     &testPaymentHash,
+				DescriptionHash: &testDescriptionHash,
 				RecoveredPubKey: testPubKey,
 				FallbackAddr:    testAddrTestnet,
 			},
@@ -487,8 +495,8 @@ func TestDecodeEncode(t *testing.T) {
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       1496314658,
-				PaymentHash:     testPaymentHash,
-				DescriptionHash: testDescriptionHash,
+				PaymentHash:     &testPaymentHash,
+				DescriptionHash: &testDescriptionHash,
 				RecoveredPubKey: testPubKey,
 				FallbackAddr:    testRustyAddr,
 				RoutingInfo: []ExtraRoutingInfo{
@@ -509,8 +517,8 @@ func TestDecodeEncode(t *testing.T) {
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       1496314658,
-				PaymentHash:     testPaymentHash,
-				DescriptionHash: testDescriptionHash,
+				PaymentHash:     &testPaymentHash,
+				DescriptionHash: &testDescriptionHash,
 				RecoveredPubKey: testPubKey,
 				FallbackAddr:    testRustyAddr,
 				RoutingInfo: []ExtraRoutingInfo{
@@ -537,8 +545,8 @@ func TestDecodeEncode(t *testing.T) {
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       1496314658,
-				PaymentHash:     testPaymentHash,
-				DescriptionHash: testDescriptionHash,
+				PaymentHash:     &testPaymentHash,
+				DescriptionHash: &testDescriptionHash,
 				RecoveredPubKey: testPubKey,
 				FallbackAddr:    testAddrMainnetP2SH,
 			},
@@ -551,8 +559,8 @@ func TestDecodeEncode(t *testing.T) {
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       1496314658,
-				PaymentHash:     testPaymentHash,
-				DescriptionHash: testDescriptionHash,
+				PaymentHash:     &testPaymentHash,
+				DescriptionHash: &testDescriptionHash,
 				RecoveredPubKey: testPubKey,
 				FallbackAddr:    testAddrMainnetP2WPKH,
 			},
@@ -565,8 +573,8 @@ func TestDecodeEncode(t *testing.T) {
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       1496314658,
-				PaymentHash:     testPaymentHash,
-				DescriptionHash: testDescriptionHash,
+				PaymentHash:     &testPaymentHash,
+				DescriptionHash: &testDescriptionHash,
 				RecoveredPubKey: testPubKey,
 				FallbackAddr:    testAddrMainnetP2WSH,
 			},
@@ -705,9 +713,9 @@ func compareInvoices(expected, actual *Invoice) error {
 			expected.Timestamp, actual.Timestamp)
 	}
 
-	if !bytes.Equal(expected.PaymentHash, actual.PaymentHash) {
+	if !compareHashes(expected.PaymentHash, actual.PaymentHash) {
 		return fmt.Errorf("expected payment hash %x, got %x",
-			expected.PaymentHash, actual.PaymentHash)
+			*expected.PaymentHash, *actual.PaymentHash)
 	}
 
 	if !reflect.DeepEqual(expected.Description, actual.Description) {
@@ -725,9 +733,9 @@ func compareInvoices(expected, actual *Invoice) error {
 			expected.RecoveredPubKey, actual.RecoveredPubKey)
 	}
 
-	if !bytes.Equal(expected.DescriptionHash, actual.DescriptionHash) {
+	if !compareHashes(expected.DescriptionHash, actual.DescriptionHash) {
 		return fmt.Errorf("expected description hash %x, got %x",
-			expected.DescriptionHash, actual.DescriptionHash)
+			*expected.DescriptionHash, *actual.DescriptionHash)
 	}
 
 	if !reflect.DeepEqual(expected.Expiry, actual.Expiry) {
@@ -783,4 +791,17 @@ func comparePubkeys(a, b *btcec.PublicKey) bool {
 		return false
 	}
 	return a.IsEqual(b)
+}
+
+func compareHashes(a, b *[32]byte) bool {
+	if a == b {
+		return true
+	}
+	if a == nil && b != nil {
+		return false
+	}
+	if b == nil && a != nil {
+		return false
+	}
+	return bytes.Equal(a[:], b[:])
 }

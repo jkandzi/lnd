@@ -128,7 +128,7 @@ type Invoice struct {
 
 	// PaymentHash is the payment hash to be used for a payment to this
 	// invoice.
-	PaymentHash []byte
+	PaymentHash *[32]byte
 
 	// PubKey of the target node.
 	// Optional.
@@ -146,7 +146,7 @@ type Invoice struct {
 	// DescriptionHash is the SHA256 hash of a description of the purpose of
 	// this invoice.
 	// Optional. Non-nil iff Description is nil.
-	DescriptionHash []byte
+	DescriptionHash *[32]byte
 
 	// Expiry specifies the timespan this invoice will be valid.
 	// Optional. If not set, a default expiry of 60 min will be implied.
@@ -200,9 +200,9 @@ func Description(description string) func(*Invoice) {
 // DescriptionHash is a functional option that allows callers of NewInvoice to
 // set the payment description hash of the created Invoice.
 // Note: Must be used if and only if Description is not used.
-func DescriptionHash(descriptionHash []byte) func(*Invoice) {
+func DescriptionHash(descriptionHash [32]byte) func(*Invoice) {
 	return func(i *Invoice) {
-		i.DescriptionHash = descriptionHash
+		i.DescriptionHash = &descriptionHash
 	}
 }
 
@@ -237,12 +237,12 @@ func RoutingInfo(routingInfo []ExtraRoutingInfo) func(*Invoice) {
 // variadic argumements for setting optional fields of the invoice.
 // Note: Either Description  or DescriptionHash must be provided for the Invoice
 // to be considered valid.
-func NewInvoice(net *chaincfg.Params, paymentHash []byte,
+func NewInvoice(net *chaincfg.Params, paymentHash [32]byte,
 	timestamp uint64, options ...func(*Invoice)) *Invoice {
 
 	invoice := &Invoice{
 		Net:         net,
-		PaymentHash: paymentHash,
+		PaymentHash: &paymentHash,
 		Timestamp:   timestamp,
 	}
 
@@ -562,7 +562,6 @@ func parseTaggedFields(invoice *Invoice, fields []byte, net *chaincfg.Params) er
 		// Advance the index in preparation for the next iteration.
 		index += 3 + int(dataLength)
 
-		var err error
 		switch typ {
 		case fieldTypeP:
 			if invoice.PaymentHash != nil {
@@ -575,11 +574,13 @@ func parseTaggedFields(invoice *Invoice, fields []byte, net *chaincfg.Params) er
 				// Skipping unknown field length.
 				continue
 			}
-			invoice.PaymentHash, err = bech32.ConvertBits(base32Data,
-				5, 8, false)
+			hash, err := bech32.ConvertBits(base32Data, 5, 8, false)
 			if err != nil {
 				return err
 			}
+			var pHash [32]byte
+			copy(pHash[:], hash[:])
+			invoice.PaymentHash = &pHash
 		case fieldTypeD:
 			if invoice.Description != nil {
 				// We skip the field if we have already seen a
@@ -627,11 +628,13 @@ func parseTaggedFields(invoice *Invoice, fields []byte, net *chaincfg.Params) er
 				// Skip unknown length.
 				continue
 			}
-			invoice.DescriptionHash, err = bech32.ConvertBits(
-				base32Data, 5, 8, false)
+			hash, err := bech32.ConvertBits(base32Data, 5, 8, false)
 			if err != nil {
 				return err
 			}
+			var dHash [32]byte
+			copy(dHash[:], hash[:])
+			invoice.DescriptionHash = &dHash
 		case fieldTypeX:
 			if invoice.Expiry != nil {
 				// We skip the field if we have already seen a
@@ -744,7 +747,7 @@ func parseTaggedFields(invoice *Invoice, fields []byte, net *chaincfg.Params) er
 func writeTaggedFields(bufferBase32 *bytes.Buffer, invoice *Invoice) error {
 	if invoice.PaymentHash != nil {
 		// Convert 32 byte hash to 52 5-bit groups.
-		base32, err := bech32.ConvertBits(invoice.PaymentHash, 8, 5,
+		base32, err := bech32.ConvertBits(invoice.PaymentHash[:], 8, 5,
 			true)
 		if err != nil {
 			return err
@@ -771,8 +774,8 @@ func writeTaggedFields(bufferBase32 *bytes.Buffer, invoice *Invoice) error {
 
 	if invoice.DescriptionHash != nil {
 		// Convert 32 byte hash to 52 5-bit groups.
-		descBase32, err := bech32.ConvertBits(invoice.DescriptionHash,
-			8, 5, true)
+		descBase32, err := bech32.ConvertBits(
+			invoice.DescriptionHash[:], 8, 5, true)
 		if err != nil {
 			return err
 		}
