@@ -18,15 +18,30 @@ import (
 const (
 	mSatPerBtc = uint64(100000000000)
 
-	// The byte corresponding to the supported field types. The field name
-	// is the character representing that 5-bit value in the bech32 string.
-	fieldTypeP = byte(1)
-	fieldTypeD = byte(13)
-	fieldTypeN = byte(19)
-	fieldTypeH = byte(23)
-	fieldTypeX = byte(6)
-	fieldTypeF = byte(9)
-	fieldTypeR = byte(3)
+	// The following byte values correspond to the supported field types.
+	// The field name is the character representing that 5-bit value in the
+	// bech32 string.
+
+	// fieldTypeP is the field containing the payment hash.
+	fieldTypeP = 1
+
+	// fieldTypeD contains a short description of the payment.
+	fieldTypeD = 13
+
+	// fieldTypeN contains the pubkey of the target node.
+	fieldTypeN = 19
+
+	// fieldTypeH contains the hash of a description of the payment.
+	fieldTypeH = 23
+
+	// fieldTypeX contains the expiry in seconds of the invoice.
+	fieldTypeX = 6
+
+	// fieldTypeF contains a fallback on-chain address.
+	fieldTypeF = 9
+
+	// fieldTypeR contains extra routing information.
+	fieldTypeR = 3
 )
 
 var (
