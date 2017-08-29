@@ -307,6 +307,7 @@ func TestDecodeEncode(t *testing.T) {
 		valid          bool
 		decodedInvoice *Invoice
 		skipEncoding   bool
+		beforeEncoding func(*Invoice)
 	}{
 		{
 			encodedInvoice: "asdsaddnasdnas", // no hrp
@@ -349,7 +350,7 @@ func TestDecodeEncode(t *testing.T) {
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       1496314658,
 				DescriptionHash: &testDescriptionHash,
-				RecoveredPubKey: testPubKey,
+				Destination:     testPubKey,
 			},
 		},
 		{
@@ -363,7 +364,7 @@ func TestDecodeEncode(t *testing.T) {
 				PaymentHash:     &testPaymentHash,
 				Description:     &testPleaseConsider,
 				DescriptionHash: &testDescriptionHash,
-				RecoveredPubKey: testPubKey,
+				Destination:     testPubKey,
 			},
 		},
 		{
@@ -371,11 +372,11 @@ func TestDecodeEncode(t *testing.T) {
 			encodedInvoice: "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqn2rne0kagfl4e0xag0w6hqeg2dwgc54hrm9m0auw52dhwhwcu559qav309h598pyzn69wh2nqauneyyesnpmaax0g6acr8lh9559jmcquyq5a9",
 			valid:          false,
 			decodedInvoice: &Invoice{
-				Net:             &chaincfg.MainNetParams,
-				MilliSat:        &testMillisat20mBTC,
-				Timestamp:       1496314658,
-				PaymentHash:     &testPaymentHash,
-				RecoveredPubKey: testPubKey,
+				Net:         &chaincfg.MainNetParams,
+				MilliSat:    &testMillisat20mBTC,
+				Timestamp:   1496314658,
+				PaymentHash: &testPaymentHash,
+				Destination: testPubKey,
 			},
 		},
 		{
@@ -383,12 +384,12 @@ func TestDecodeEncode(t *testing.T) {
 			encodedInvoice: "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2pkx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaqtq2v93xxer9vczq8v93xxeqv72xr42ca60022jqu6fu73n453tmnr0ukc0pl0t23w7eavtensjz0j2wcu7nkxhfdgp9y37welajh5kw34mq7m4xuay0a72cwec8qwgqt5vqht",
 			valid:          true,
 			decodedInvoice: &Invoice{
-				Net:             &chaincfg.MainNetParams,
-				MilliSat:        &testMillisat20mBTC,
-				Timestamp:       1496314658,
-				PaymentHash:     &testPaymentHash,
-				Description:     &testPleaseConsider,
-				RecoveredPubKey: testPubKey,
+				Net:         &chaincfg.MainNetParams,
+				MilliSat:    &testMillisat20mBTC,
+				Timestamp:   1496314658,
+				PaymentHash: &testPaymentHash,
+				Description: &testPleaseConsider,
+				Destination: testPubKey,
 			},
 			skipEncoding: true, // Skip encoding since we don't have the unknown fields to encode.
 		},
@@ -402,7 +403,7 @@ func TestDecodeEncode(t *testing.T) {
 				Timestamp:       1496314658,
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
-				RecoveredPubKey: testPubKey,
+				Destination:     testPubKey,
 			},
 			skipEncoding: true, // Skip encoding since we don't have the unknown fields to encode.
 		},
@@ -415,7 +416,7 @@ func TestDecodeEncode(t *testing.T) {
 				MilliSat:        &testMillisat24BTC,
 				Timestamp:       1503429093,
 				PaymentHash:     &testPaymentHash,
-				PubKey:          testPubKey,
+				Destination:     testPubKey,
 				DescriptionHash: &testDescriptionHash,
 			},
 			skipEncoding: true, // Skip encoding since we don't have the unknown fields to encode.
@@ -425,11 +426,17 @@ func TestDecodeEncode(t *testing.T) {
 			encodedInvoice: "lnbc1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2pkx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaq8rkx3yf5tcsyz3d73gafnh3cax9rn449d9p5uxz9ezhhypd0elx87sjle52x86fux2ypatgddc6k63n7erqz25le42c4u4ecky03ylcqca784w",
 			valid:          true,
 			decodedInvoice: &Invoice{
-				Net:             &chaincfg.MainNetParams,
-				Timestamp:       1496314658,
-				PaymentHash:     &testPaymentHash,
-				Description:     &testPleaseConsider,
-				RecoveredPubKey: testPubKey,
+				Net:         &chaincfg.MainNetParams,
+				Timestamp:   1496314658,
+				PaymentHash: &testPaymentHash,
+				Description: &testPleaseConsider,
+				Destination: testPubKey,
+			},
+			beforeEncoding: func(i *Invoice) {
+				// Since this destination pubkey was recovered
+				// from the signature, we must set it nil before
+				// encoding to get back the same invoice string.
+				i.Destination = nil
 			},
 		},
 		{
@@ -441,7 +448,7 @@ func TestDecodeEncode(t *testing.T) {
 				MilliSat:    &testMillisat24BTC,
 				Timestamp:   1503429093,
 				PaymentHash: &testPaymentHash,
-				PubKey:      testPubKey,
+				Destination: testPubKey,
 				Description: &testEmptyString,
 			},
 		},
@@ -455,9 +462,14 @@ func TestDecodeEncode(t *testing.T) {
 				Timestamp:   1496314658,
 				PaymentHash: &testPaymentHash,
 				Description: &testCupOfCoffee,
-				// PubKey:      testPubKey,
-				RecoveredPubKey: testPubKey,
-				Expiry:          &testExpiry60,
+				Destination: testPubKey,
+				Expiry:      &testExpiry60,
+			},
+			beforeEncoding: func(i *Invoice) {
+				// Since this destination pubkey was recovered
+				// from the signature, we must set it nil before
+				// encoding to get back the same invoice string.
+				i.Destination = nil
 			},
 		},
 		{
@@ -470,7 +482,13 @@ func TestDecodeEncode(t *testing.T) {
 				Timestamp:       1496314658,
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
-				RecoveredPubKey: testPubKey,
+				Destination:     testPubKey,
+			},
+			beforeEncoding: func(i *Invoice) {
+				// Since this destination pubkey was recovered
+				// from the signature, we must set it nil before
+				// encoding to get back the same invoice string.
+				i.Destination = nil
 			},
 		},
 		{
@@ -483,8 +501,14 @@ func TestDecodeEncode(t *testing.T) {
 				Timestamp:       1496314658,
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
-				RecoveredPubKey: testPubKey,
+				Destination:     testPubKey,
 				FallbackAddr:    testAddrTestnet,
+			},
+			beforeEncoding: func(i *Invoice) {
+				// Since this destination pubkey was recovered
+				// from the signature, we must set it nil before
+				// encoding to get back the same invoice string.
+				i.Destination = nil
 			},
 		},
 		{
@@ -497,7 +521,7 @@ func TestDecodeEncode(t *testing.T) {
 				Timestamp:       1496314658,
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
-				RecoveredPubKey: testPubKey,
+				Destination:     testPubKey,
 				FallbackAddr:    testRustyAddr,
 				RoutingInfo: []ExtraRoutingInfo{
 					ExtraRoutingInfo{
@@ -507,6 +531,12 @@ func TestDecodeEncode(t *testing.T) {
 						CltvExpDelta: 3,
 					},
 				},
+			},
+			beforeEncoding: func(i *Invoice) {
+				// Since this destination pubkey was recovered
+				// from the signature, we must set it nil before
+				// encoding to get back the same invoice string.
+				i.Destination = nil
 			},
 		},
 		{
@@ -519,7 +549,7 @@ func TestDecodeEncode(t *testing.T) {
 				Timestamp:       1496314658,
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
-				RecoveredPubKey: testPubKey,
+				Destination:     testPubKey,
 				FallbackAddr:    testRustyAddr,
 				RoutingInfo: []ExtraRoutingInfo{
 					ExtraRoutingInfo{
@@ -536,6 +566,12 @@ func TestDecodeEncode(t *testing.T) {
 					},
 				},
 			},
+			beforeEncoding: func(i *Invoice) {
+				// Since this destination pubkey was recovered
+				// from the signature, we must set it nil before
+				// encoding to get back the same invoice string.
+				i.Destination = nil
+			},
 		},
 		{
 			// On mainnet, with fallback (p2sh) address 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
@@ -547,8 +583,14 @@ func TestDecodeEncode(t *testing.T) {
 				Timestamp:       1496314658,
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
-				RecoveredPubKey: testPubKey,
+				Destination:     testPubKey,
 				FallbackAddr:    testAddrMainnetP2SH,
+			},
+			beforeEncoding: func(i *Invoice) {
+				// Since this destination pubkey was recovered
+				// from the signature, we must set it nil before
+				// encoding to get back the same invoice string.
+				i.Destination = nil
 			},
 		},
 		{
@@ -561,8 +603,14 @@ func TestDecodeEncode(t *testing.T) {
 				Timestamp:       1496314658,
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
-				RecoveredPubKey: testPubKey,
+				Destination:     testPubKey,
 				FallbackAddr:    testAddrMainnetP2WPKH,
+			},
+			beforeEncoding: func(i *Invoice) {
+				// Since this destination pubkey was recovered
+				// from the signature, we must set it nil before
+				// encoding to get back the same invoice string.
+				i.Destination = nil
 			},
 		},
 		{
@@ -575,8 +623,14 @@ func TestDecodeEncode(t *testing.T) {
 				Timestamp:       1496314658,
 				PaymentHash:     &testPaymentHash,
 				DescriptionHash: &testDescriptionHash,
-				RecoveredPubKey: testPubKey,
+				Destination:     testPubKey,
 				FallbackAddr:    testAddrMainnetP2WSH,
+			},
+			beforeEncoding: func(i *Invoice) {
+				// Since this destination pubkey was recovered
+				// from the signature, we must set it nil before
+				// encoding to get back the same invoice string.
+				i.Destination = nil
 			},
 		},
 	}
@@ -597,6 +651,10 @@ func TestDecodeEncode(t *testing.T) {
 
 		if test.skipEncoding {
 			continue
+		}
+
+		if test.beforeEncoding != nil {
+			test.beforeEncoding(test.decodedInvoice)
 		}
 
 		if test.decodedInvoice != nil {
@@ -645,7 +703,7 @@ func TestNewInvoice(t *testing.T) {
 					testPaymentHash, 1503429093,
 					Amount(testMillisat24BTC),
 					Description(testEmptyString),
-					PubKey(testPubKey))
+					Destination(testPubKey))
 			},
 			valid:          true,
 			encodedInvoice: "lnbc241pveeq09pp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdqqnp4q0n326hr8v9zprg8gsvezcch06gfaqqhde2aj730yg0durunfhv66jd3m5klcwhq68vdsmx2rjgxeay5v0tkt2v5sjaky4eqahe4fx3k9sqavvce3capfuwv8rvjng57jrtfajn5dkpqv8yelsewtljwmmycq62k443",
@@ -723,14 +781,9 @@ func compareInvoices(expected, actual *Invoice) error {
 			*expected.Description, *actual.Description)
 	}
 
-	if !comparePubkeys(expected.PubKey, actual.PubKey) {
-		return fmt.Errorf("expected pubkey %x, got %x",
-			expected.PubKey, actual.PubKey)
-	}
-
-	if !comparePubkeys(expected.RecoveredPubKey, actual.RecoveredPubKey) {
-		return fmt.Errorf("expected recovered pubkey %x, got %x",
-			expected.RecoveredPubKey, actual.RecoveredPubKey)
+	if !comparePubkeys(expected.Destination, actual.Destination) {
+		return fmt.Errorf("expected destination pubkey %x, got %x",
+			expected.Destination, actual.Destination)
 	}
 
 	if !compareHashes(expected.DescriptionHash, actual.DescriptionHash) {

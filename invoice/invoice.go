@@ -129,14 +129,12 @@ type Invoice struct {
 	// invoice.
 	PaymentHash *[32]byte
 
-	// PubKey of the target node.
-	// Optional.
-	PubKey *btcec.PublicKey
-
-	// RecoveredPubKey is set to the public key recovered from an encoded
-	// invoice. Will only be non-nil if PubKey is nil. Will be ignored
-	// when encoding.
-	RecoveredPubKey *btcec.PublicKey
+	// Destination is the public key of the target node. This will always
+	// be set after decoding, and can optionally be set before encoding to
+	// include the pubkey as an 'n' field. If this is not set before
+	// encoding then the destination pubkey won't be added as an 'n' field,
+	// and the pubkey will be extracted from the signature during decoding.
+	Destination *btcec.PublicKey
 
 	// Description is a short description of the purpose of this invoice.
 	// Optional. Non-nil iff DescriptionHash is nil.
@@ -179,11 +177,11 @@ func Amount(milliSat lnwire.MilliSatoshi) func(*Invoice) {
 	}
 }
 
-// PubKey is a functional option that allows callers of NewInvoice to explicitly
-// set the pubkey of the Invoice's target node.
-func PubKey(pubKey *btcec.PublicKey) func(*Invoice) {
+// Destination is a functional option that allows callers of NewInvoice to
+// explicitly set the pubkey of the Invoice's destination node.
+func Destination(destination *btcec.PublicKey) func(*Invoice) {
 	return func(i *Invoice) {
-		i.PubKey = pubKey
+		i.Destination = destination
 	}
 }
 
@@ -337,12 +335,12 @@ func Decode(invoice string) (*Invoice, error) {
 	// data.
 	hash := chainhash.HashB(toSign)
 
-	// If pubkey was provided as a tagged field, use that to verify the
-	// signature, if not do public key recovery.
-	if decodedInvoice.PubKey != nil {
+	// If the destination pubkey was provided as a tagged field, use that
+	// to verify the signature, if not do public key recovery.
+	if decodedInvoice.Destination != nil {
 		var signature *btcec.Signature
 		lnwire.DeserializeSigFromWire(&signature, sigBytes)
-		if !signature.Verify(hash, decodedInvoice.PubKey) {
+		if !signature.Verify(hash, decodedInvoice.Destination) {
 			return nil, fmt.Errorf("invalid invoice signature")
 		}
 	} else {
@@ -353,7 +351,7 @@ func Decode(invoice string) (*Invoice, error) {
 		if err != nil {
 			return nil, err
 		}
-		decodedInvoice.RecoveredPubKey = pubkey
+		decodedInvoice.Destination = pubkey
 	}
 
 	// Now that we have created the invoice, make sure it has the required
@@ -435,10 +433,10 @@ func (invoice *Invoice) Encode(signer MessageSigner) (string, error) {
 
 	// If the pubkey field was explicitly set, it must be set to the pubkey
 	// used to create the signature.
-	if invoice.PubKey != nil {
+	if invoice.Destination != nil {
 		var signature *btcec.Signature
 		lnwire.DeserializeSigFromWire(&signature, sigBytes)
-		valid := signature.Verify(hash, invoice.PubKey)
+		valid := signature.Verify(hash, invoice.Destination)
 		if !valid {
 			return "", fmt.Errorf("signature does not match " +
 				"provided pubkey")
@@ -493,10 +491,10 @@ func validateInvoice(invoice *Invoice) error {
 			len(invoice.DescriptionHash))
 	}
 
-	if invoice.PubKey != nil &&
-		len(invoice.PubKey.SerializeCompressed()) != 33 {
+	if invoice.Destination != nil &&
+		len(invoice.Destination.SerializeCompressed()) != 33 {
 		return fmt.Errorf("unsupported pubkey length: %d",
-			len(invoice.PubKey.SerializeCompressed()))
+			len(invoice.Destination.SerializeCompressed()))
 	}
 
 	return nil
@@ -595,7 +593,7 @@ func parseTaggedFields(invoice *Invoice, fields []byte, net *chaincfg.Params) er
 			desc := string(base256Data)
 			invoice.Description = &desc
 		case fieldTypeN:
-			if invoice.PubKey != nil {
+			if invoice.Destination != nil {
 				// We skip the field if we have already seen a
 				// supported one.
 				continue
@@ -611,7 +609,7 @@ func parseTaggedFields(invoice *Invoice, fields []byte, net *chaincfg.Params) er
 			if err != nil {
 				return err
 			}
-			invoice.PubKey, err = btcec.ParsePubKey(base256Data,
+			invoice.Destination, err = btcec.ParsePubKey(base256Data,
 				btcec.S256())
 			if err != nil {
 				return err
@@ -836,17 +834,17 @@ func writeTaggedFields(bufferBase32 *bytes.Buffer, invoice *Invoice) error {
 		writeTaggedField(bufferBase32, fieldTypeR, routingDataBase32)
 	}
 
-	if invoice.PubKey != nil {
+	if invoice.Destination != nil {
 		// Convert 33 byte pubkey to 53 5-bit groups.
 		pubKeyBase32, err := bech32.ConvertBits(
-			invoice.PubKey.SerializeCompressed(), 8, 5, true)
+			invoice.Destination.SerializeCompressed(), 8, 5, true)
 		if err != nil {
 			return nil
 		}
 
 		if len(pubKeyBase32) != 53 {
 			return fmt.Errorf("invalid pubkey length: %d",
-				len(invoice.PubKey.SerializeCompressed()))
+				len(invoice.Destination.SerializeCompressed()))
 		}
 
 		writeTaggedField(bufferBase32, fieldTypeN, pubKeyBase32)
