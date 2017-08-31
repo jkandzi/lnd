@@ -70,6 +70,21 @@ func (n *nodeSigner) SignCompact(msg []byte) ([]byte, error) {
 	return sig, nil
 }
 
+func (n *nodeSigner) SignHashCompact(hash []byte) ([]byte, error) {
+
+	// Should the signature reference a compressed public key or not.
+	isCompressedKey := true
+
+	// btcec.SignCompact returns a pubkey-recoverable signature
+	sig, err := btcec.SignCompact(btcec.S256(), n.privKey, hash,
+		isCompressedKey)
+	if err != nil {
+		return nil, fmt.Errorf("can't sign the hash: %v", err)
+	}
+
+	return sig, nil
+}
+
 // A compile time check to ensure that nodeSigner implements the MessageSigner
 // interface.
 var _ lnwallet.MessageSigner = (*nodeSigner)(nil)

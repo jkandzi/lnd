@@ -1460,7 +1460,8 @@ func (r *rpcServer) SendPayment(paymentStream lnrpc.Lightning_SendPaymentServer)
 					// TODO(roasbeef): eliminate necessary
 					// encode/decode
 					nextPayment.Dest = payReq.Destination.SerializeCompressed()
-					nextPayment.Amt = int64(payReq.Amount)
+					// TODO: amount is optional
+					nextPayment.Amt = int64(payReq.MilliSat.ToSatoshis())
 					nextPayment.PaymentHash = payReq.PaymentHash[:]
 				}
 
@@ -1614,8 +1615,8 @@ func (r *rpcServer) SendPaymentSync(ctx context.Context,
 			return nil, err
 		}
 		destPub = payReq.Destination
-		amt = payReq.Amount
-		rHash = payReq.PaymentHash
+		amt = payReq.MilliSat.ToSatoshis()
+		rHash = *payReq.PaymentHash
 
 		// Otherwise, the payment conditions have been manually
 		// specified in the proto.
@@ -1767,11 +1768,26 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 
 	// Finally we also create an encoded payment request which allows the
 	// caller to compactly send the invoice to the payer.
-	payReqString := zpay32.Encode(&zpay32.PaymentRequest{
-		Destination: r.server.identityPriv.PubKey(),
-		PaymentHash: rHash,
-		Amount:      amt,
-	})
+	mSat := lnwire.NewMSatFromSatoshis(amt)
+	payReq, err := zpay32.NewInvoice(
+		activeNetParams.Params,
+		rHash,
+		i.CreationDate,
+		zpay32.Amount(mSat),
+		zpay32.Destination(r.server.identityPriv.PubKey()),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	payReqString, err := payReq.Encode(
+		zpay32.MessageSigner{
+			SignCompact: r.server.nodeSigner.SignHashCompact,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	return &lnrpc.AddInvoiceResponse{
 		RHash:          rHash[:],
@@ -1831,19 +1847,37 @@ func (r *rpcServer) LookupInvoice(ctx context.Context,
 
 	preimage := invoice.Terms.PaymentPreimage
 	satAmt := invoice.Terms.Value.ToSatoshis()
+
+	mSat := lnwire.NewMSatFromSatoshis(satAmt)
+	payReq, err := zpay32.NewInvoice(
+		activeNetParams.Params,
+		sha256.Sum256(preimage[:]),
+		invoice.CreationDate,
+		zpay32.Amount(mSat),
+		zpay32.Destination(r.server.identityPriv.PubKey()),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	payReqString, err := payReq.Encode(
+		zpay32.MessageSigner{
+			SignCompact: r.server.nodeSigner.SignHashCompact,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	return &lnrpc.Invoice{
-		Memo:         string(invoice.Memo[:]),
-		Receipt:      invoice.Receipt[:],
-		RHash:        rHash,
-		RPreimage:    preimage[:],
-		Value:        int64(satAmt),
-		CreationDate: invoice.CreationDate.Unix(),
-		Settled:      invoice.Terms.Settled,
-		PaymentRequest: zpay32.Encode(&zpay32.PaymentRequest{
-			Destination: r.server.identityPriv.PubKey(),
-			PaymentHash: sha256.Sum256(preimage[:]),
-			Amount:      satAmt,
-		}),
+		Memo:           string(invoice.Memo[:]),
+		Receipt:        invoice.Receipt[:],
+		RHash:          rHash,
+		RPreimage:      preimage[:],
+		Value:          int64(satAmt),
+		CreationDate:   invoice.CreationDate.Unix(),
+		Settled:        invoice.Terms.Settled,
+		PaymentRequest: payReqString,
 	}, nil
 }
 
@@ -1871,19 +1905,36 @@ func (r *rpcServer) ListInvoices(ctx context.Context,
 		paymentPreimge := dbInvoice.Terms.PaymentPreimage[:]
 		rHash := sha256.Sum256(paymentPreimge)
 
+		mSat := lnwire.NewMSatFromSatoshis(invoiceAmount)
+		payReq, err := zpay32.NewInvoice(
+			activeNetParams.Params,
+			sha256.Sum256(paymentPreimge),
+			dbInvoice.CreationDate,
+			zpay32.Amount(mSat),
+			zpay32.Destination(r.server.identityPriv.PubKey()),
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		payReqString, err := payReq.Encode(
+			zpay32.MessageSigner{
+				SignCompact: r.server.nodeSigner.SignHashCompact,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+
 		invoice := &lnrpc.Invoice{
-			Memo:         string(dbInvoice.Memo[:]),
-			Receipt:      dbInvoice.Receipt[:],
-			RHash:        rHash[:],
-			RPreimage:    paymentPreimge,
-			Value:        int64(invoiceAmount),
-			Settled:      dbInvoice.Terms.Settled,
-			CreationDate: dbInvoice.CreationDate.Unix(),
-			PaymentRequest: zpay32.Encode(&zpay32.PaymentRequest{
-				Destination: r.server.identityPriv.PubKey(),
-				PaymentHash: sha256.Sum256(paymentPreimge),
-				Amount:      invoiceAmount,
-			}),
+			Memo:           string(dbInvoice.Memo[:]),
+			Receipt:        dbInvoice.Receipt[:],
+			RHash:          rHash[:],
+			RPreimage:      paymentPreimge,
+			Value:          int64(invoiceAmount),
+			Settled:        dbInvoice.Terms.Settled,
+			CreationDate:   dbInvoice.CreationDate.Unix(),
+			PaymentRequest: payReqString,
 		}
 
 		invoices[i] = invoice
@@ -2715,7 +2766,7 @@ func (r *rpcServer) DecodePayReq(ctx context.Context,
 	return &lnrpc.PayReq{
 		Destination: hex.EncodeToString(dest),
 		PaymentHash: hex.EncodeToString(payReq.PaymentHash[:]),
-		NumSatoshis: int64(payReq.Amount),
+		NumSatoshis: int64(payReq.MilliSat.ToSatoshis()),
 	}, nil
 }
 
