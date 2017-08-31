@@ -1775,6 +1775,7 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 		i.CreationDate,
 		zpay32.Amount(mSat),
 		zpay32.Destination(r.server.identityPriv.PubKey()),
+		zpay32.Description("todo description"),
 	)
 	if err != nil {
 		return nil, err
@@ -1855,6 +1856,7 @@ func (r *rpcServer) LookupInvoice(ctx context.Context,
 		invoice.CreationDate,
 		zpay32.Amount(mSat),
 		zpay32.Destination(r.server.identityPriv.PubKey()),
+		zpay32.Description("todo description"),
 	)
 	if err != nil {
 		return nil, err
@@ -1912,6 +1914,7 @@ func (r *rpcServer) ListInvoices(ctx context.Context,
 			dbInvoice.CreationDate,
 			zpay32.Amount(mSat),
 			zpay32.Destination(r.server.identityPriv.PubKey()),
+			zpay32.Description("todo description"),
 		)
 		if err != nil {
 			return nil, err
