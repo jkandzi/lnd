@@ -1,4 +1,4 @@
-package invoice
+package invoice_test
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lightningnetwork/lnd/invoice"
 	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg"
@@ -44,7 +45,7 @@ var (
 	testPaymentHash     [32]byte
 	testDescriptionHash [32]byte
 
-	testMessageSigner = MessageSigner{
+	testMessageSigner = invoice.MessageSigner{
 		SignCompact: func(hash []byte) ([]byte, error) {
 			sig, err := btcec.SignCompact(btcec.S256(),
 				testPrivKey, hash, true)
@@ -62,44 +63,6 @@ func init() {
 	copy(testDescriptionHash[:], testDescriptionHashSlice[:])
 }
 
-// TestParseTimestamp checks that the 35 bit timestamp is properly parsed.
-func TestParseTimestamp(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		data   []byte
-		valid  bool
-		result uint64
-	}{
-		{
-			data:  []byte(""),
-			valid: false, // empty data
-		},
-		{
-			data:  []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-			valid: false, // data too short
-		},
-		{
-			data:   []byte{0x01, 0x0c, 0x12, 0x1f, 0x1c, 0x19, 0x02},
-			valid:  true, // timestamp 1496314658
-			result: 1496314658,
-		},
-	}
-
-	for i, test := range tests {
-		time, err := parseTimestamp(test.data)
-		if (err == nil) != test.valid {
-			t.Errorf("Data decoding test %d failed: %v", i, err)
-			return
-		}
-		if test.valid && time != test.result {
-			t.Errorf("Timestamp decoding test %d failed: expected "+
-				"timestamp %d, got %d", i, test.result, time)
-			return
-		}
-	}
-}
-
 // TestDecodeEncode tests that an encoded invoice gets decoded into the expected
 // Invoice object, and that reencoding the decoded invoice gets us back to the
 // original encoded string.
@@ -109,9 +72,9 @@ func TestDecodeEncode(t *testing.T) {
 	tests := []struct {
 		encodedInvoice string
 		valid          bool
-		decodedInvoice *Invoice
+		decodedInvoice *invoice.Invoice
 		skipEncoding   bool
-		beforeEncoding func(*Invoice)
+		beforeEncoding func(*invoice.Invoice)
 	}{
 		{
 			encodedInvoice: "asdsaddnasdnas", // no hrp
@@ -149,7 +112,7 @@ func TestDecodeEncode(t *testing.T) {
 			// no payment hash set
 			encodedInvoice: "lnbc20m1pvjluezhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsjv38luh6p6s2xrv3mzvlmzaya43376h0twal5ax0k6p47498hp3hnaymzhsn424rxqjs0q7apn26yrhaxltq3vzwpqj9nc2r3kzwccsplnq470",
 			valid:          false,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       time.Unix(1496314658, 0),
@@ -161,7 +124,7 @@ func TestDecodeEncode(t *testing.T) {
 			// Both Description and DescriptionHash set.
 			encodedInvoice: "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2pkx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaqhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqs03vghs8y0kuj4ulrzls8ln7fnm9dk7sjsnqmghql6hd6jut36clkqpyuq0s5m6fhureyz0szx2qjc8hkgf4xc2hpw8jpu26jfeyvf4cpga36gt",
 			valid:          false,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       time.Unix(1496314658, 0),
@@ -175,7 +138,7 @@ func TestDecodeEncode(t *testing.T) {
 			// Neither Description nor DescriptionHash set.
 			encodedInvoice: "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqn2rne0kagfl4e0xag0w6hqeg2dwgc54hrm9m0auw52dhwhwcu559qav309h598pyzn69wh2nqauneyyesnpmaax0g6acr8lh9559jmcquyq5a9",
 			valid:          false,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:         &chaincfg.MainNetParams,
 				MilliSat:    &testMillisat20mBTC,
 				Timestamp:   time.Unix(1496314658, 0),
@@ -187,7 +150,7 @@ func TestDecodeEncode(t *testing.T) {
 			// Has a few unknown fields, should just be ignored.
 			encodedInvoice: "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2pkx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaqtq2v93xxer9vczq8v93xxeqv72xr42ca60022jqu6fu73n453tmnr0ukc0pl0t23w7eavtensjz0j2wcu7nkxhfdgp9y37welajh5kw34mq7m4xuay0a72cwec8qwgqt5vqht",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:         &chaincfg.MainNetParams,
 				MilliSat:    &testMillisat20mBTC,
 				Timestamp:   time.Unix(1496314658, 0),
@@ -201,7 +164,7 @@ func TestDecodeEncode(t *testing.T) {
 			// Ignore unknown witness version in fallback address.
 			encodedInvoice: "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfpppw508d6qejxtdg4y5r3zarvary0c5xw7k8txqv6x0a75xuzp0zsdzk5hq6tmfgweltvs6jk5nhtyd9uqksvr48zga9mw08667w8264gkspluu66jhtcmct36nx363km6cquhhv2cpc6q43r",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       time.Unix(1496314658, 0),
@@ -215,7 +178,7 @@ func TestDecodeEncode(t *testing.T) {
 			// Ignore fields with unknown lengths.
 			encodedInvoice: "lnbc241pveeq09pp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqpp3qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqshp38yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahnp4q0n326hr8v9zprg8gsvezcch06gfaqqhde2aj730yg0durunfhv66np3q0n326hr8v9zprg8gsvezcch06gfaqqhde2aj730yg0durunfy8huflvs2zwkymx47cszugvzn5v64ahemzzlmm62rpn9l9rm05h35aceq00tkt296289wepws9jh4499wq2l0vk6xcxffd90dpuqchqqztyayq",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat24BTC,
 				Timestamp:       time.Unix(1503429093, 0),
@@ -229,14 +192,14 @@ func TestDecodeEncode(t *testing.T) {
 			// Please make a donation of any amount using rhash 0001020304050607080900010203040506070809000102030405060708090102 to me @03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad
 			encodedInvoice: "lnbc1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2pkx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaq8rkx3yf5tcsyz3d73gafnh3cax9rn449d9p5uxz9ezhhypd0elx87sjle52x86fux2ypatgddc6k63n7erqz25le42c4u4ecky03ylcqca784w",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:         &chaincfg.MainNetParams,
 				Timestamp:   time.Unix(1496314658, 0),
 				PaymentHash: &testPaymentHash,
 				Description: &testPleaseConsider,
 				Destination: testPubKey,
 			},
-			beforeEncoding: func(i *Invoice) {
+			beforeEncoding: func(i *invoice.Invoice) {
 				// Since this destination pubkey was recovered
 				// from the signature, we must set it nil before
 				// encoding to get back the same invoice string.
@@ -247,7 +210,7 @@ func TestDecodeEncode(t *testing.T) {
 			// Same as above, pubkey set in 'n' field.
 			encodedInvoice: "lnbc241pveeq09pp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdqqnp4q0n326hr8v9zprg8gsvezcch06gfaqqhde2aj730yg0durunfhv66jd3m5klcwhq68vdsmx2rjgxeay5v0tkt2v5sjaky4eqahe4fx3k9sqavvce3capfuwv8rvjng57jrtfajn5dkpqv8yelsewtljwmmycq62k443",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:         &chaincfg.MainNetParams,
 				MilliSat:    &testMillisat24BTC,
 				Timestamp:   time.Unix(1503429093, 0),
@@ -260,7 +223,7 @@ func TestDecodeEncode(t *testing.T) {
 			// Please send $3 for a cup of coffee to the same peer, within 1 minute
 			encodedInvoice: "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:         &chaincfg.MainNetParams,
 				MilliSat:    &testMillisat2500uBTC,
 				Timestamp:   time.Unix(1496314658, 0),
@@ -269,7 +232,7 @@ func TestDecodeEncode(t *testing.T) {
 				Destination: testPubKey,
 				Expiry:      &testExpiry60,
 			},
-			beforeEncoding: func(i *Invoice) {
+			beforeEncoding: func(i *invoice.Invoice) {
 				// Since this destination pubkey was recovered
 				// from the signature, we must set it nil before
 				// encoding to get back the same invoice string.
@@ -280,7 +243,7 @@ func TestDecodeEncode(t *testing.T) {
 			// Now send $24 for an entire list of things (hashed)
 			encodedInvoice: "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqscc6gd6ql3jrc5yzme8v4ntcewwz5cnw92tz0pc8qcuufvq7khhr8wpald05e92xw006sq94mg8v2ndf4sefvf9sygkshp5zfem29trqq2yxxz7",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       time.Unix(1496314658, 0),
@@ -288,7 +251,7 @@ func TestDecodeEncode(t *testing.T) {
 				DescriptionHash: &testDescriptionHash,
 				Destination:     testPubKey,
 			},
-			beforeEncoding: func(i *Invoice) {
+			beforeEncoding: func(i *invoice.Invoice) {
 				// Since this destination pubkey was recovered
 				// from the signature, we must set it nil before
 				// encoding to get back the same invoice string.
@@ -299,7 +262,7 @@ func TestDecodeEncode(t *testing.T) {
 			// The same, on testnet, with a fallback address mk2QpYatsKicvFVuTAQLBryyccRXMUaGHP
 			encodedInvoice: "lntb20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfpp3x9et2e20v6pu37c5d9vax37wxq72un98k6vcx9fz94w0qf237cm2rqv9pmn5lnexfvf5579slr4zq3u8kmczecytdx0xg9rwzngp7e6guwqpqlhssu04sucpnz4axcv2dstmknqq6jsk2l",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:             &chaincfg.TestNet3Params,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       time.Unix(1496314658, 0),
@@ -308,7 +271,7 @@ func TestDecodeEncode(t *testing.T) {
 				Destination:     testPubKey,
 				FallbackAddr:    testAddrTestnet,
 			},
-			beforeEncoding: func(i *Invoice) {
+			beforeEncoding: func(i *invoice.Invoice) {
 				// Since this destination pubkey was recovered
 				// from the signature, we must set it nil before
 				// encoding to get back the same invoice string.
@@ -319,7 +282,7 @@ func TestDecodeEncode(t *testing.T) {
 			// On mainnet, with fallback address 1RustyRX2oai4EYYDpQGWvEL62BBGqN9T with extra routing info to get to node 029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255
 			encodedInvoice: "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfpp3qjmp7lwpagxun9pygexvgpjdc4jdj85frzjq20q82gphp2nflc7jtzrcazrra7wwgzxqc8u7754cdlpfrmccae92qgzqvzq2ps8pqqqqqqqqqqqq9qqqvncsk57n4v9ehw86wq8fzvjejhv9z3w3q5zh6qkql005x9xl240ch23jk79ujzvr4hsmmafyxghpqe79psktnjl668ntaf4ne7ucs5csqh5mnnk",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       time.Unix(1496314658, 0),
@@ -327,8 +290,8 @@ func TestDecodeEncode(t *testing.T) {
 				DescriptionHash: &testDescriptionHash,
 				Destination:     testPubKey,
 				FallbackAddr:    testRustyAddr,
-				RoutingInfo: []ExtraRoutingInfo{
-					ExtraRoutingInfo{
+				RoutingInfo: []invoice.ExtraRoutingInfo{
+					invoice.ExtraRoutingInfo{
 						PubKey:       testRoutingInfoPubkey,
 						ShortChanID:  0x0102030405060708,
 						Fee:          20,
@@ -336,7 +299,7 @@ func TestDecodeEncode(t *testing.T) {
 					},
 				},
 			},
-			beforeEncoding: func(i *Invoice) {
+			beforeEncoding: func(i *invoice.Invoice) {
 				// Since this destination pubkey was recovered
 				// from the signature, we must set it nil before
 				// encoding to get back the same invoice string.
@@ -347,7 +310,7 @@ func TestDecodeEncode(t *testing.T) {
 			// On mainnet, with fallback address 1RustyRX2oai4EYYDpQGWvEL62BBGqN9T with extra routing info to go via nodes 029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255 then 039e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255
 			encodedInvoice: "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfpp3qjmp7lwpagxun9pygexvgpjdc4jdj85fr9yq20q82gphp2nflc7jtzrcazrra7wwgzxqc8u7754cdlpfrmccae92qgzqvzq2ps8pqqqqqqqqqqqq9qqqvpeuqafqxu92d8lr6fvg0r5gv0heeeqgcrqlnm6jhphu9y00rrhy4grqszsvpcgpy9qqqqqqqqqqqq7qqzqfnlkwydm8rg30gjku7wmxmk06sevjp53fmvrcfegvwy7d5443jvyhxsel0hulkstws7vqv400q4j3wgpk4crg49682hr4scqvmad43cqd5m7tf",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       time.Unix(1496314658, 0),
@@ -355,14 +318,14 @@ func TestDecodeEncode(t *testing.T) {
 				DescriptionHash: &testDescriptionHash,
 				Destination:     testPubKey,
 				FallbackAddr:    testRustyAddr,
-				RoutingInfo: []ExtraRoutingInfo{
-					ExtraRoutingInfo{
+				RoutingInfo: []invoice.ExtraRoutingInfo{
+					invoice.ExtraRoutingInfo{
 						PubKey:       testRoutingInfoPubkey,
 						ShortChanID:  0x0102030405060708,
 						Fee:          20,
 						CltvExpDelta: 3,
 					},
-					ExtraRoutingInfo{
+					invoice.ExtraRoutingInfo{
 						PubKey:       testRoutingInfoPubkey2,
 						ShortChanID:  0x030405060708090a,
 						Fee:          30,
@@ -370,7 +333,7 @@ func TestDecodeEncode(t *testing.T) {
 					},
 				},
 			},
-			beforeEncoding: func(i *Invoice) {
+			beforeEncoding: func(i *invoice.Invoice) {
 				// Since this destination pubkey was recovered
 				// from the signature, we must set it nil before
 				// encoding to get back the same invoice string.
@@ -381,7 +344,7 @@ func TestDecodeEncode(t *testing.T) {
 			// On mainnet, with fallback (p2sh) address 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
 			encodedInvoice: "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfppj3a24vwu6r8ejrss3axul8rxldph2q7z9kk822r8plup77n9yq5ep2dfpcydrjwzxs0la84v3tfw43t3vqhek7f05m6uf8lmfkjn7zv7enn76sq65d8u9lxav2pl6x3xnc2ww3lqpagnh0u",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       time.Unix(1496314658, 0),
@@ -390,7 +353,7 @@ func TestDecodeEncode(t *testing.T) {
 				Destination:     testPubKey,
 				FallbackAddr:    testAddrMainnetP2SH,
 			},
-			beforeEncoding: func(i *Invoice) {
+			beforeEncoding: func(i *invoice.Invoice) {
 				// Since this destination pubkey was recovered
 				// from the signature, we must set it nil before
 				// encoding to get back the same invoice string.
@@ -401,7 +364,7 @@ func TestDecodeEncode(t *testing.T) {
 			// On mainnet, with fallback (p2wpkh) address bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4
 			encodedInvoice: "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfppqw508d6qejxtdg4y5r3zarvary0c5xw7kknt6zz5vxa8yh8jrnlkl63dah48yh6eupakk87fjdcnwqfcyt7snnpuz7vp83txauq4c60sys3xyucesxjf46yqnpplj0saq36a554cp9wt865",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       time.Unix(1496314658, 0),
@@ -410,7 +373,7 @@ func TestDecodeEncode(t *testing.T) {
 				Destination:     testPubKey,
 				FallbackAddr:    testAddrMainnetP2WPKH,
 			},
-			beforeEncoding: func(i *Invoice) {
+			beforeEncoding: func(i *invoice.Invoice) {
 				// Since this destination pubkey was recovered
 				// from the signature, we must set it nil before
 				// encoding to get back the same invoice string.
@@ -421,7 +384,7 @@ func TestDecodeEncode(t *testing.T) {
 			// On mainnet, with fallback (p2wsh) address bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3
 			encodedInvoice: "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfp4qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qvnjha2auylmwrltv2pkp2t22uy8ura2xsdwhq5nm7s574xva47djmnj2xeycsu7u5v8929mvuux43j0cqhhf32wfyn2th0sv4t9x55sppz5we8",
 			valid:          true,
-			decodedInvoice: &Invoice{
+			decodedInvoice: &invoice.Invoice{
 				Net:             &chaincfg.MainNetParams,
 				MilliSat:        &testMillisat20mBTC,
 				Timestamp:       time.Unix(1496314658, 0),
@@ -430,7 +393,7 @@ func TestDecodeEncode(t *testing.T) {
 				Destination:     testPubKey,
 				FallbackAddr:    testAddrMainnetP2WSH,
 			},
-			beforeEncoding: func(i *Invoice) {
+			beforeEncoding: func(i *invoice.Invoice) {
 				// Since this destination pubkey was recovered
 				// from the signature, we must set it nil before
 				// encoding to get back the same invoice string.
@@ -440,7 +403,7 @@ func TestDecodeEncode(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		invoice, err := Decode(test.encodedInvoice)
+		invoice, err := invoice.Decode(test.encodedInvoice)
 		if (err == nil) != test.valid {
 			t.Errorf("Decoding test %d failed: %v", i, err)
 			return
@@ -485,49 +448,49 @@ func TestNewInvoice(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		newInvoice     func() (*Invoice, error)
+		newInvoice     func() (*invoice.Invoice, error)
 		encodedInvoice string
 		valid          bool
 	}{
 		{
 			// Both Description and DescriptionHash set.
-			newInvoice: func() (*Invoice, error) {
-				return NewInvoice(&chaincfg.MainNetParams,
+			newInvoice: func() (*invoice.Invoice, error) {
+				return invoice.NewInvoice(&chaincfg.MainNetParams,
 					testPaymentHash, time.Unix(1496314658, 0),
-					DescriptionHash(testDescriptionHash),
-					Description(testPleaseConsider))
+					invoice.DescriptionHash(testDescriptionHash),
+					invoice.Description(testPleaseConsider))
 			},
 			valid: false, // Both Description and DescriptionHash set.
 		},
 		{
 			// 'n' field set.
-			newInvoice: func() (*Invoice, error) {
-				return NewInvoice(&chaincfg.MainNetParams,
+			newInvoice: func() (*invoice.Invoice, error) {
+				return invoice.NewInvoice(&chaincfg.MainNetParams,
 					testPaymentHash, time.Unix(1503429093, 0),
-					Amount(testMillisat24BTC),
-					Description(testEmptyString),
-					Destination(testPubKey))
+					invoice.Amount(testMillisat24BTC),
+					invoice.Description(testEmptyString),
+					invoice.Destination(testPubKey))
 			},
 			valid:          true,
 			encodedInvoice: "lnbc241pveeq09pp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdqqnp4q0n326hr8v9zprg8gsvezcch06gfaqqhde2aj730yg0durunfhv66jd3m5klcwhq68vdsmx2rjgxeay5v0tkt2v5sjaky4eqahe4fx3k9sqavvce3capfuwv8rvjng57jrtfajn5dkpqv8yelsewtljwmmycq62k443",
 		},
 		{
 			// On mainnet, with fallback address 1RustyRX2oai4EYYDpQGWvEL62BBGqN9T with extra routing info to go via nodes 029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255 then 039e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255
-			newInvoice: func() (*Invoice, error) {
-				return NewInvoice(&chaincfg.MainNetParams,
+			newInvoice: func() (*invoice.Invoice, error) {
+				return invoice.NewInvoice(&chaincfg.MainNetParams,
 					testPaymentHash, time.Unix(1496314658, 0),
-					Amount(testMillisat20mBTC),
-					DescriptionHash(testDescriptionHash),
-					FallbackAddr(testRustyAddr),
-					RoutingInfo(
-						[]ExtraRoutingInfo{
-							ExtraRoutingInfo{
+					invoice.Amount(testMillisat20mBTC),
+					invoice.DescriptionHash(testDescriptionHash),
+					invoice.FallbackAddr(testRustyAddr),
+					invoice.RoutingInfo(
+						[]invoice.ExtraRoutingInfo{
+							invoice.ExtraRoutingInfo{
 								PubKey:       testRoutingInfoPubkey,
 								ShortChanID:  0x0102030405060708,
 								Fee:          20,
 								CltvExpDelta: 3,
 							},
-							ExtraRoutingInfo{
+							invoice.ExtraRoutingInfo{
 								PubKey:       testRoutingInfoPubkey2,
 								ShortChanID:  0x030405060708090a,
 								Fee:          30,
@@ -562,7 +525,7 @@ func TestNewInvoice(t *testing.T) {
 	}
 }
 
-func compareInvoices(expected, actual *Invoice) error {
+func compareInvoices(expected, actual *invoice.Invoice) error {
 	if !reflect.DeepEqual(expected.Net, actual.Net) {
 		return fmt.Errorf("expected net %v, got %v",
 			expected.Net, actual.Net)
