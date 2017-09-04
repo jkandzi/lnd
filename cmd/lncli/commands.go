@@ -764,7 +764,7 @@ var sendPaymentCommand = cli.Command{
 		},
 		cli.StringFlag{
 			Name:  "pay_req",
-			Usage: "a zbase32-check encoded payment request to fulfill",
+			Usage: "a bech32 encoded payment request to fulfill",
 		},
 	},
 	Action: sendPayment,
@@ -885,24 +885,36 @@ var addInvoiceCommand = cli.Command{
 	Name:  "addinvoice",
 	Usage: "add a new invoice.",
 	Description: "Add a new invoice, expressing intent for a future payment. " +
-		"The value of the invoice in satoshis and a 32 byte hash preimage are neccesary for the creation",
-	ArgsUsage: "value preimage",
+		"The value of the invoice in satoshis, and a description or " +
+		"description hash of the payment are neccesary for the creation",
+	ArgsUsage: "value description",
 	Flags: []cli.Flag{
 		cli.StringFlag{
 			Name:  "memo",
-			Usage: "an optional memo to attach along with the invoice",
+			Usage: "an optional memo for record keeping purposes",
 		},
 		cli.StringFlag{
 			Name:  "receipt",
 			Usage: "an optional cryptographic receipt of payment",
 		},
 		cli.StringFlag{
-			Name:  "preimage",
-			Usage: "the hex-encoded preimage (32 byte) which will allow settling an incoming HTLC payable to this preimage",
+			Name: "preimage",
+			Usage: "the hex-encoded preimage (32 byte) which will " +
+				"allow settling an incoming HTLC payable to this " +
+				"preimage. If not set, a random preimage will be " +
+				"created.",
 		},
 		cli.Int64Flag{
 			Name:  "value",
 			Usage: "the value of this invoice in satoshis",
+		},
+		cli.StringFlag{
+			Name:  "description",
+			Usage: "short description of the payment",
+		},
+		cli.StringFlag{
+			Name:  "description_hash",
+			Usage: "SHA-256 hash of the description of the payment",
 		},
 	},
 	Action: addInvoice,
@@ -911,6 +923,8 @@ var addInvoiceCommand = cli.Command{
 func addInvoice(ctx *cli.Context) error {
 	var (
 		preimage []byte
+		descHash []byte
+		desc     string
 		receipt  []byte
 		value    int64
 		err      error
@@ -935,12 +949,18 @@ func addInvoice(ctx *cli.Context) error {
 	}
 
 	switch {
-	case ctx.IsSet("preimage"):
-		preimage, err = hex.DecodeString(ctx.String("preimage"))
+	case ctx.IsSet("description"):
+		desc = ctx.String("description")
 	case args.Present():
-		preimage, err = hex.DecodeString(args.First())
+		desc = args.First()
 	}
 
+	descHash, err = hex.DecodeString(ctx.String("description_hash"))
+	if err != nil {
+		return fmt.Errorf("unable to parse description_hash: %v", err)
+	}
+
+	preimage, err = hex.DecodeString(ctx.String("preimage"))
 	if err != nil {
 		return fmt.Errorf("unable to parse preimage: %v", err)
 	}
@@ -951,10 +971,12 @@ func addInvoice(ctx *cli.Context) error {
 	}
 
 	invoice := &lnrpc.Invoice{
-		Memo:      ctx.String("memo"),
-		Receipt:   receipt,
-		RPreimage: preimage,
-		Value:     value,
+		Memo:            ctx.String("memo"),
+		Receipt:         receipt,
+		RPreimage:       preimage,
+		Value:           value,
+		Description:     desc,
+		DescriptionHash: descHash,
 	}
 
 	resp, err := client.AddInvoice(context.Background(), invoice)
@@ -1490,7 +1512,7 @@ var decodePayReqComamnd = cli.Command{
 	Flags: []cli.Flag{
 		cli.StringFlag{
 			Name:  "pay_req",
-			Usage: "the zpay32 encoded payment request",
+			Usage: "the bech32 encoded payment request",
 		},
 	},
 	Action: decodePayReq,

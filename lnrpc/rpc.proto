@@ -1129,7 +1129,11 @@ message SetAliasResponse {
 }
 
 message Invoice {
-    /// An optional memo to attach along with the invoice
+    /**
+    An optional memo to keep with the invoice. Only for record keeping
+    purposes, use the description field to attach a description to the
+    payment request.
+    */
     string memo = 1 [json_name = "memo"];
 
     /// An optional cryptographic receipt of payment
@@ -1162,6 +1166,19 @@ message Invoice {
     payment to the recipient.
     */
     string payment_request = 9 [json_name = "payment_request"];
+
+    /**
+    Short description of the payment, which will be encoded withing the payment
+    request. Must be set if an only if description_hash is not set.
+    */
+    string description = 10 [json_name = "description"];
+
+    /**
+    Hash (SHA256) of a description of the payment. Used if the description of
+    payment is too long to naturally fit within the description field. Must be
+    set if an only if description is not set.
+    */
+    bytes description_hash = 11 [json_name = "description_hash"];
 }
 message AddInvoiceResponse {
     bytes r_hash = 1 [json_name = "r_hash"];
@@ -1241,6 +1258,8 @@ message PayReq {
     string destination = 1 [json_name = "destination"];
     string payment_hash = 2 [json_name = "payment_hash"];
     int64 num_satoshis = 3 [json_name = "num_satoshis"];
+    string description = 4 [json_name = "description"];
+    string description_hash = 5 [json_name = "description_hash"];
 }
 
 message FeeReportRequest {}

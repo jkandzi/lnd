@@ -1460,7 +1460,18 @@ func (r *rpcServer) SendPayment(paymentStream lnrpc.Lightning_SendPaymentServer)
 					// TODO(roasbeef): eliminate necessary
 					// encode/decode
 					nextPayment.Dest = payReq.Destination.SerializeCompressed()
-					// TODO: amount is optional
+					if payReq.MilliSat == nil {
+						err := fmt.Errorf("only payment" +
+							" requests specifying" +
+							" the amount are" +
+							" currently supported")
+						select {
+						case errChan <- err:
+						case <-reqQuit:
+							return
+						}
+						return
+					}
 					nextPayment.Amt = int64(payReq.MilliSat.ToSatoshis())
 					nextPayment.PaymentHash = payReq.PaymentHash[:]
 				}
@@ -1615,6 +1626,11 @@ func (r *rpcServer) SendPaymentSync(ctx context.Context,
 			return nil, err
 		}
 		destPub = payReq.Destination
+
+		if payReq.MilliSat == nil {
+			return nil, fmt.Errorf("invoices with no amount " +
+				"specified not currently supported")
+		}
 		amt = payReq.MilliSat.ToSatoshis()
 		rHash = *payReq.PaymentHash
 
@@ -1717,8 +1733,8 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 		copy(paymentPreimage[:], invoice.RPreimage[:])
 	}
 
-	// The size of the memo and receipt attached must not exceed the
-	// maximum values for either of the fields.
+	// The size of the memo, receipt, description and description hash
+	// attached must not exceed the maximum values for either of the fields.
 	if len(invoice.Memo) > channeldb.MaxMemoSize {
 		return nil, fmt.Errorf("memo too large: %v bytes "+
 			"(maxsize=%v)", len(invoice.Memo), channeldb.MaxMemoSize)
@@ -1726,6 +1742,16 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 	if len(invoice.Receipt) > channeldb.MaxReceiptSize {
 		return nil, fmt.Errorf("receipt too large: %v bytes "+
 			"(maxsize=%v)", len(invoice.Receipt), channeldb.MaxReceiptSize)
+	}
+	if len(invoice.Description) > channeldb.MaxDescriptionSize {
+		return nil, fmt.Errorf("description too long: %v bytes "+
+			"(maxsize=%v)", len(invoice.Description),
+			channeldb.MaxDescriptionSize)
+	}
+	if len(invoice.DescriptionHash) > 0 &&
+		len(invoice.DescriptionHash) != channeldb.DescriptionHashSize {
+		return nil, fmt.Errorf("description hash is %v bytes, must be %v",
+			len(invoice.DescriptionHash), channeldb.DescriptionHashSize)
 	}
 
 	amt := btcutil.Amount(invoice.Value)
@@ -1743,39 +1769,52 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 	}
 
 	i := &channeldb.Invoice{
-		CreationDate: time.Now(),
-		Memo:         []byte(invoice.Memo),
-		Receipt:      invoice.Receipt,
+		CreationDate:    time.Now(),
+		Memo:            []byte(invoice.Memo),
+		Receipt:         invoice.Receipt,
+		Description:     []byte(invoice.Description),
+		DescriptionHash: invoice.DescriptionHash,
 		Terms: channeldb.ContractTerm{
 			Value: amtMSat,
 		},
 	}
 	copy(i.Terms.PaymentPreimage[:], paymentPreimage[:])
 
-	rpcsLog.Tracef("[addinvoice] adding new invoice %v",
-		newLogClosure(func() string {
-			return spew.Sdump(i)
-		}))
-
-	// With all sanity checks passed, write the invoice to the database.
-	if err := r.server.invoices.AddInvoice(i); err != nil {
-		return nil, err
-	}
-
 	// Next, generate the payment hash itself from the preimage. This will
 	// be used by clients to query for the state of a particular invoice.
 	rHash := sha256.Sum256(paymentPreimage[:])
 
-	// Finally we also create an encoded payment request which allows the
-	// caller to compactly send the invoice to the payer.
-	mSat := lnwire.NewMSatFromSatoshis(amt)
+	// We also create an encoded payment request which allows the
+	// caller to compactly send the invoice to the payer. We'll create a
+	// list of options to be added to the encoded invoice. For now we only
+	// support the required fields description/description_hash, and the
+	// amount field.
+	var options []func(*zpay32.Invoice)
+
+	// First check that a decription or decription hash was set.
+	if len(invoice.Description) > 0 {
+		options = append(options, zpay32.Description(invoice.Description))
+	}
+	if len(invoice.DescriptionHash) > 0 {
+		var descHash [32]byte
+		copy(descHash[:], invoice.DescriptionHash[:])
+		options = append(options, zpay32.DescriptionHash(descHash))
+	}
+
+	if len(options) != 1 {
+		return nil, fmt.Errorf("description or description hash must " +
+			"be set, not both.")
+	}
+
+	// Add the amount. This field is optional by the BOLT-11 format, but
+	// we require it for now.
+	options = append(options, zpay32.Amount(amtMSat))
+
 	payReq, err := zpay32.NewInvoice(
 		activeNetParams.Params,
 		rHash,
 		i.CreationDate,
-		zpay32.Amount(mSat),
-		zpay32.Destination(r.server.identityPriv.PubKey()),
-		zpay32.Description("todo description"),
+		options...,
 	)
 	if err != nil {
 		return nil, err
@@ -1787,6 +1826,16 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 		},
 	)
 	if err != nil {
+		return nil, err
+	}
+
+	rpcsLog.Tracef("[addinvoice] adding new invoice %v",
+		newLogClosure(func() string {
+			return spew.Sdump(i)
+		}))
+
+	// With all sanity checks passed, write the invoice to the database.
+	if err := r.server.invoices.AddInvoice(i); err != nil {
 		return nil, err
 	}
 
@@ -1850,13 +1899,25 @@ func (r *rpcServer) LookupInvoice(ctx context.Context,
 	satAmt := invoice.Terms.Value.ToSatoshis()
 
 	mSat := lnwire.NewMSatFromSatoshis(satAmt)
+
+	// Add the non-empty fields to a list of options, such that they can be
+	// part of the encoded invoice.
+	var options []func(*zpay32.Invoice)
+	options = append(options, zpay32.Amount(mSat))
+
+	if len(invoice.Description) > 0 {
+		options = append(options, zpay32.Description(string(invoice.Description)))
+	}
+	if len(invoice.DescriptionHash) > 0 {
+		var descHash [32]byte
+		copy(descHash[:], invoice.DescriptionHash[:])
+		options = append(options, zpay32.DescriptionHash(descHash))
+	}
 	payReq, err := zpay32.NewInvoice(
 		activeNetParams.Params,
 		sha256.Sum256(preimage[:]),
 		invoice.CreationDate,
-		zpay32.Amount(mSat),
-		zpay32.Destination(r.server.identityPriv.PubKey()),
-		zpay32.Description("todo description"),
+		options...,
 	)
 	if err != nil {
 		return nil, err
@@ -1908,13 +1969,24 @@ func (r *rpcServer) ListInvoices(ctx context.Context,
 		rHash := sha256.Sum256(paymentPreimge)
 
 		mSat := lnwire.NewMSatFromSatoshis(invoiceAmount)
+
+		var options []func(*zpay32.Invoice)
+
+		if len(dbInvoice.Description) > 0 {
+			options = append(options, zpay32.Description(string(dbInvoice.Description)))
+		}
+		if len(dbInvoice.DescriptionHash) > 0 {
+			var descHash [32]byte
+			copy(descHash[:], dbInvoice.DescriptionHash[:])
+			options = append(options, zpay32.DescriptionHash(descHash))
+		}
+		options = append(options, zpay32.Amount(mSat))
+
 		payReq, err := zpay32.NewInvoice(
 			activeNetParams.Params,
 			sha256.Sum256(paymentPreimge),
 			dbInvoice.CreationDate,
-			zpay32.Amount(mSat),
-			zpay32.Destination(r.server.identityPriv.PubKey()),
-			zpay32.Description("todo description"),
+			options...,
 		)
 		if err != nil {
 			return nil, err
@@ -2765,11 +2837,23 @@ func (r *rpcServer) DecodePayReq(ctx context.Context,
 		return nil, err
 	}
 
+	desc := ""
+	if payReq.Description != nil {
+		desc = *payReq.Description
+	}
+
+	descHash := []byte("")
+	if payReq.DescriptionHash != nil {
+		descHash = payReq.DescriptionHash[:]
+	}
+
 	dest := payReq.Destination.SerializeCompressed()
 	return &lnrpc.PayReq{
-		Destination: hex.EncodeToString(dest),
-		PaymentHash: hex.EncodeToString(payReq.PaymentHash[:]),
-		NumSatoshis: int64(payReq.MilliSat.ToSatoshis()),
+		Destination:     hex.EncodeToString(dest),
+		PaymentHash:     hex.EncodeToString(payReq.PaymentHash[:]),
+		NumSatoshis:     int64(payReq.MilliSat.ToSatoshis()),
+		Description:     desc,
+		DescriptionHash: hex.EncodeToString(descHash[:]),
 	}, nil
 }
 

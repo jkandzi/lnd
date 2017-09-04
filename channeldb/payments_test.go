@@ -17,9 +17,11 @@ func makeFakePayment() *OutgoingPayment {
 	fakeInvoice := &Invoice{
 		// Use single second precision to avoid false positive test
 		// failures due to the monotonic time component.
-		CreationDate: time.Unix(time.Now().Unix(), 0),
-		Memo:         []byte("fake memo"),
-		Receipt:      []byte("fake receipt"),
+		CreationDate:    time.Unix(time.Now().Unix(), 0),
+		Memo:            []byte("fake memo"),
+		Receipt:         []byte("fake receipt"),
+		Description:     []byte("fake desc"),
+		DescriptionHash: []byte(""),
 	}
 
 	copy(fakeInvoice.Terms.PaymentPreimage[:], rev[:])
@@ -68,6 +70,12 @@ func makeRandomFakePayment() (*OutgoingPayment, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	fakeInvoice.Description, err = randomBytes(1, 50)
+	if err != nil {
+		return nil, err
+	}
+	fakeInvoice.DescriptionHash = []byte("")
 
 	preImg, err := randomBytes(32, 33)
 	if err != nil {
