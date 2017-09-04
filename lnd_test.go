@@ -996,9 +996,10 @@ func testSingleHopInvoice(net *networkHarness, t *harnessTest) {
 	const paymentAmt = 1000
 	preimage := bytes.Repeat([]byte("A"), 32)
 	invoice := &lnrpc.Invoice{
-		Memo:      "testing",
-		RPreimage: preimage,
-		Value:     paymentAmt,
+		Memo:        "testing",
+		Description: "testing some single hop invoices",
+		RPreimage:   preimage,
+		Value:       paymentAmt,
 	}
 	invoiceResp, err := net.Bob.AddInvoice(ctxb, invoice)
 	if err != nil {
@@ -1066,8 +1067,9 @@ func testSingleHopInvoice(net *networkHarness, t *harnessTest) {
 	// to one will be randomly generated. We'll test the proper
 	// encoding/decoding of the zpay32 payment requests.
 	invoice = &lnrpc.Invoice{
-		Memo:  "test3",
-		Value: paymentAmt,
+		Memo:        "test3",
+		Description: "test3 description",
+		Value:       paymentAmt,
 	}
 	invoiceResp, err = net.Bob.AddInvoice(ctxb, invoice)
 	if err != nil {
@@ -1132,9 +1134,10 @@ func testListPayments(net *networkHarness, t *harnessTest) {
 	const paymentAmt = 1000
 	preimage := bytes.Repeat([]byte("B"), 32)
 	invoice := &lnrpc.Invoice{
-		Memo:      "testing",
-		RPreimage: preimage,
-		Value:     paymentAmt,
+		Memo:        "testing",
+		Description: "test decription",
+		RPreimage:   preimage,
+		Value:       paymentAmt,
 	}
 	addInvoiceCtxt, _ := context.WithTimeout(ctxb, timeout)
 	invoiceResp, err := net.Bob.AddInvoice(addInvoiceCtxt, invoice)
@@ -1297,8 +1300,9 @@ func testMultiHopPayments(net *networkHarness, t *harnessTest) {
 	rHashes := make([][]byte, numPayments)
 	for i := 0; i < numPayments; i++ {
 		invoice := &lnrpc.Invoice{
-			Memo:  "testing",
-			Value: paymentAmt,
+			Memo:        "testing",
+			Description: "test desc",
+			Value:       paymentAmt,
 		}
 		resp, err := net.Bob.AddInvoice(ctxb, invoice)
 		if err != nil {
@@ -1478,9 +1482,10 @@ func testInvoiceSubscriptions(net *networkHarness, t *harnessTest) {
 	const paymentAmt = 1000
 	preimage := bytes.Repeat([]byte{byte(90)}, 32)
 	invoice := &lnrpc.Invoice{
-		Memo:      "testing",
-		RPreimage: preimage,
-		Value:     paymentAmt,
+		Memo:        "testing",
+		Description: "test description",
+		RPreimage:   preimage,
+		Value:       paymentAmt,
 	}
 	invoiceResp, err := net.Bob.AddInvoice(ctxb, invoice)
 	if err != nil {
@@ -1776,9 +1781,10 @@ func testRevokedCloseRetribution(net *networkHarness, t *harnessTest) {
 	for i := 0; i < numInvoices; i++ {
 		preimage := bytes.Repeat([]byte{byte(255 - i)}, 32)
 		invoice := &lnrpc.Invoice{
-			Memo:      "testing",
-			RPreimage: preimage,
-			Value:     paymentAmt,
+			Memo:        "testing",
+			Description: "test desc",
+			RPreimage:   preimage,
+			Value:       paymentAmt,
 		}
 		resp, err := net.Bob.AddInvoice(ctxb, invoice)
 		if err != nil {
@@ -2048,9 +2054,10 @@ func testRevokedCloseRetributionPostBreachConf(
 	for i := 0; i < numInvoices; i++ {
 		preimage := bytes.Repeat([]byte{byte(192 - i)}, 32)
 		invoice := &lnrpc.Invoice{
-			Memo:      "testing",
-			RPreimage: preimage,
-			Value:     paymentAmt,
+			Memo:        "testing",
+			Description: "test descr",
+			RPreimage:   preimage,
+			Value:       paymentAmt,
 		}
 		resp, err := carol.AddInvoice(ctxb, invoice)
 		if err != nil {
@@ -2361,8 +2368,9 @@ out:
 	// use to test some error cases.
 	const payAmt = 10000
 	invoiceReq := &lnrpc.Invoice{
-		Memo:  "kek99",
-		Value: payAmt,
+		Memo:        "kek99",
+		Description: "kek99 desc",
+		Value:       payAmt,
 	}
 	carolInvoice, err := carol.AddInvoice(ctxb, invoiceReq)
 	if err != nil {
@@ -2473,7 +2481,8 @@ out:
 		}
 
 		invoiceReq = &lnrpc.Invoice{
-			Value: toSend,
+			Description: "carol desc",
+			Value:       toSend,
 		}
 		carolInvoice2, err := carol.AddInvoice(ctxb, invoiceReq)
 		if err != nil {
@@ -2502,7 +2511,8 @@ out:
 		t.Fatalf("unable to create payment stream: %v", err)
 	}
 	invoiceReq = &lnrpc.Invoice{
-		Value: 100000,
+		Description: "alice description",
+		Value:       100000,
 	}
 	carolInvoice3, err := carol.AddInvoice(ctxb, invoiceReq)
 	if err != nil {
@@ -3015,9 +3025,10 @@ func testAsyncPayments(net *networkHarness, t *harnessTest) {
 		}
 
 		invoice := &lnrpc.Invoice{
-			Memo:      "testing",
-			RPreimage: preimage,
-			Value:     paymentAmt,
+			Memo:        "testing",
+			Description: "testing desc",
+			RPreimage:   preimage,
+			Value:       paymentAmt,
 		}
 		resp, err := net.Bob.AddInvoice(ctxb, invoice)
 		if err != nil {
@@ -3198,9 +3209,10 @@ func testBidirectionalAsyncPayments(net *networkHarness, t *harnessTest) {
 		}
 
 		invoice := &lnrpc.Invoice{
-			Memo:      "testing",
-			RPreimage: preimage,
-			Value:     paymentAmt,
+			Memo:        "testing",
+			Description: "test desc",
+			RPreimage:   preimage,
+			Value:       paymentAmt,
 		}
 		resp, err := net.Bob.AddInvoice(ctxb, invoice)
 		if err != nil {
@@ -3221,9 +3233,10 @@ func testBidirectionalAsyncPayments(net *networkHarness, t *harnessTest) {
 		}
 
 		invoice := &lnrpc.Invoice{
-			Memo:      "testing",
-			RPreimage: preimage,
-			Value:     paymentAmt,
+			Memo:        "testing",
+			Description: "test decription",
+			RPreimage:   preimage,
+			Value:       paymentAmt,
 		}
 		resp, err := net.Alice.AddInvoice(ctxb, invoice)
 		if err != nil {
