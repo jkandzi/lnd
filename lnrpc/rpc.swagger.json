@@ -1249,7 +1249,7 @@
       "properties": {
         "memo": {
           "type": "string",
-          "description": "*\nAn optional memo to keep with the invoice. Only for record keeping\npurposes, use the description field to attach a description to the\npayment request."
+          "description": "*\nAn optional memo to attach along with the invoice. Used for record keeping\npurposes for the invoice's creator, and will also be set in the description\nfield of the encoded invoice if the descriptiop_hash field is not set."
         },
         "receipt": {
           "type": "string",
@@ -1290,14 +1290,10 @@
           "type": "string",
           "description": "*\nA bare-bones invoice for a payment within the Lightning Network.  With the\ndetails of the invoice, the sender has all the data necessary to send a\npayment to the recipient."
         },
-        "description": {
-          "type": "string",
-          "description": "*\nShort description of the payment, which will be encoded withing the payment\nrequest. Must be set if an only if description_hash is not set."
-        },
         "description_hash": {
           "type": "string",
           "format": "byte",
-          "description": "*\nHash (SHA256) of a description of the payment. Used if the description of\npayment is too long to naturally fit within the description field. Must be\nset if an only if description is not set."
+          "description": "*\nHash (SHA256) of a description of the payment. Used if the description of\npayment (memo) is too long to naturally fit within the description field\nof an encoded invoice."
         }
       }
     },

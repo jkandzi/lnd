@@ -1743,11 +1743,6 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 		return nil, fmt.Errorf("receipt too large: %v bytes "+
 			"(maxsize=%v)", len(invoice.Receipt), channeldb.MaxReceiptSize)
 	}
-	if len(invoice.Description) > channeldb.MaxDescriptionSize {
-		return nil, fmt.Errorf("description too long: %v bytes "+
-			"(maxsize=%v)", len(invoice.Description),
-			channeldb.MaxDescriptionSize)
-	}
 	if len(invoice.DescriptionHash) > 0 &&
 		len(invoice.DescriptionHash) != channeldb.DescriptionHashSize {
 		return nil, fmt.Errorf("description hash is %v bytes, must be %v",
@@ -1772,7 +1767,6 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 		CreationDate:    time.Now(),
 		Memo:            []byte(invoice.Memo),
 		Receipt:         invoice.Receipt,
-		Description:     []byte(invoice.Description),
 		DescriptionHash: invoice.DescriptionHash,
 		Terms: channeldb.ContractTerm{
 			Value: amtMSat,
@@ -1791,19 +1785,16 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 	// amount field.
 	var options []func(*zpay32.Invoice)
 
-	// First check that a decription or decription hash was set.
-	if len(invoice.Description) > 0 {
-		options = append(options, zpay32.Description(invoice.Description))
-	}
+	// If the description hash is set, then we add it do the list of options.
+	// If not, use the memo field as the invoice description.
 	if len(invoice.DescriptionHash) > 0 {
 		var descHash [32]byte
 		copy(descHash[:], invoice.DescriptionHash[:])
 		options = append(options, zpay32.DescriptionHash(descHash))
-	}
-
-	if len(options) != 1 {
-		return nil, fmt.Errorf("description or description hash must " +
-			"be set, not both.")
+	} else {
+		// Use the memo field as the invoice description. If this is
+		// not set this will just be an empty string.
+		options = append(options, zpay32.Description(invoice.Memo))
 	}
 
 	// Add the amount. This field is optional by the BOLT-11 format, but
@@ -1822,7 +1813,7 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 
 	payReqString, err := payReq.Encode(
 		zpay32.MessageSigner{
-			SignCompact: r.server.nodeSigner.SignHashCompact,
+			SignCompact: r.server.nodeSigner.SignDigestCompact,
 		},
 	)
 	if err != nil {
@@ -1905,13 +1896,12 @@ func (r *rpcServer) LookupInvoice(ctx context.Context,
 	var options []func(*zpay32.Invoice)
 	options = append(options, zpay32.Amount(mSat))
 
-	if len(invoice.Description) > 0 {
-		options = append(options, zpay32.Description(string(invoice.Description)))
-	}
 	if len(invoice.DescriptionHash) > 0 {
 		var descHash [32]byte
 		copy(descHash[:], invoice.DescriptionHash[:])
 		options = append(options, zpay32.DescriptionHash(descHash))
+	} else {
+		options = append(options, zpay32.Description(string(invoice.Memo)))
 	}
 	payReq, err := zpay32.NewInvoice(
 		activeNetParams.Params,
@@ -1925,7 +1915,7 @@ func (r *rpcServer) LookupInvoice(ctx context.Context,
 
 	payReqString, err := payReq.Encode(
 		zpay32.MessageSigner{
-			SignCompact: r.server.nodeSigner.SignHashCompact,
+			SignCompact: r.server.nodeSigner.SignDigestCompact,
 		},
 	)
 	if err != nil {
@@ -1972,13 +1962,12 @@ func (r *rpcServer) ListInvoices(ctx context.Context,
 
 		var options []func(*zpay32.Invoice)
 
-		if len(dbInvoice.Description) > 0 {
-			options = append(options, zpay32.Description(string(dbInvoice.Description)))
-		}
 		if len(dbInvoice.DescriptionHash) > 0 {
 			var descHash [32]byte
 			copy(descHash[:], dbInvoice.DescriptionHash[:])
 			options = append(options, zpay32.DescriptionHash(descHash))
+		} else {
+			options = append(options, zpay32.Description(string(dbInvoice.Memo)))
 		}
 		options = append(options, zpay32.Amount(mSat))
 
@@ -1994,7 +1983,7 @@ func (r *rpcServer) ListInvoices(ctx context.Context,
 
 		payReqString, err := payReq.Encode(
 			zpay32.MessageSigner{
-				SignCompact: r.server.nodeSigner.SignHashCompact,
+				SignCompact: r.server.nodeSigner.SignDigestCompact,
 			},
 		)
 		if err != nil {

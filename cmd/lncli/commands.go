@@ -885,13 +885,14 @@ var addInvoiceCommand = cli.Command{
 	Name:  "addinvoice",
 	Usage: "add a new invoice.",
 	Description: "Add a new invoice, expressing intent for a future payment. " +
-		"The value of the invoice in satoshis, and a description or " +
-		"description hash of the payment are neccesary for the creation",
-	ArgsUsage: "value description",
+		"The value of the invoice in satoshis is neccesary for the " +
+		"creation, the remaining parameters are optional.",
+	ArgsUsage: "value preimage",
 	Flags: []cli.Flag{
 		cli.StringFlag{
-			Name:  "memo",
-			Usage: "an optional memo for record keeping purposes",
+			Name: "memo",
+			Usage: "a description of the payment to attach along " +
+				"with the invoice (default=\"\")",
 		},
 		cli.StringFlag{
 			Name:  "receipt",
@@ -909,12 +910,12 @@ var addInvoiceCommand = cli.Command{
 			Usage: "the value of this invoice in satoshis",
 		},
 		cli.StringFlag{
-			Name:  "description",
-			Usage: "short description of the payment",
-		},
-		cli.StringFlag{
-			Name:  "description_hash",
-			Usage: "SHA-256 hash of the description of the payment",
+			Name: "description_hash",
+			Usage: "SHA-256 hash of the description of the payment. " +
+				"Used if the purpose of payment cannot naturally " +
+				"fit within the memo. If supplied this will be " +
+				"used instead of the description(memo) field in " +
+				"the encoded invoice.",
 		},
 	},
 	Action: addInvoice,
@@ -924,7 +925,6 @@ func addInvoice(ctx *cli.Context) error {
 	var (
 		preimage []byte
 		descHash []byte
-		desc     string
 		receipt  []byte
 		value    int64
 		err      error
@@ -949,20 +949,18 @@ func addInvoice(ctx *cli.Context) error {
 	}
 
 	switch {
-	case ctx.IsSet("description"):
-		desc = ctx.String("description")
+	case ctx.IsSet("preimage"):
+		preimage, err = hex.DecodeString(ctx.String("preimage"))
 	case args.Present():
-		desc = args.First()
+		preimage, err = hex.DecodeString(args.First())
+	}
+	if err != nil {
+		return fmt.Errorf("unable to parse preimage: %v", err)
 	}
 
 	descHash, err = hex.DecodeString(ctx.String("description_hash"))
 	if err != nil {
 		return fmt.Errorf("unable to parse description_hash: %v", err)
-	}
-
-	preimage, err = hex.DecodeString(ctx.String("preimage"))
-	if err != nil {
-		return fmt.Errorf("unable to parse preimage: %v", err)
 	}
 
 	receipt, err = hex.DecodeString(ctx.String("receipt"))
@@ -975,7 +973,6 @@ func addInvoice(ctx *cli.Context) error {
 		Receipt:         receipt,
 		RPreimage:       preimage,
 		Value:           value,
-		Description:     desc,
 		DescriptionHash: descHash,
 	}
 

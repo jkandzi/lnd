@@ -44,10 +44,6 @@ const (
 	// within the database along side incoming/outgoing invoices.
 	MaxReceiptSize = 1024
 
-	// MaxDescriptionSize is the maximum size of a description for an
-	// invoice.
-	MaxDescriptionSize = 1024
-
 	// DescriptionHashSize is the size of a SHA256 description hash.
 	DescriptionHashSize = 32
 )
@@ -93,11 +89,6 @@ type Invoice struct {
 	// TODO(roasbeef): document scheme.
 	Receipt []byte
 
-	// Description is an optional field, a short description of the payment.
-	// It is stored here in order for us to be able to recreate the encoded
-	// payment request for this invoice.
-	Description []byte
-
 	// DescriptionHash is an optional field, a SHA-256 hash of a description
 	// of the payment. It is stored here in order for us to be able to
 	// recreate the encoded payment request.
@@ -124,11 +115,6 @@ func validateInvoice(i *Invoice) error {
 		return fmt.Errorf("max length a receipt is %v, and invoice "+
 			"of length %v was provided", MaxReceiptSize,
 			len(i.Receipt))
-	}
-
-	if len(i.Description) > MaxDescriptionSize {
-		return fmt.Errorf("max length a description is %v, and one of "+
-			"length %v was provided", MaxDescriptionSize, len(i.Description))
 	}
 	if len(i.DescriptionHash) > 0 &&
 		len(i.DescriptionHash) != DescriptionHashSize {
@@ -333,11 +319,6 @@ func serializeInvoice(w io.Writer, i *Invoice) error {
 	if err := wire.WriteVarBytes(w, 0, i.Receipt[:]); err != nil {
 		return err
 	}
-
-	if err := wire.WriteVarBytes(w, 0, i.Description[:]); err != nil {
-		return err
-	}
-
 	if err := wire.WriteVarBytes(w, 0, i.DescriptionHash[:]); err != nil {
 		return err
 	}
@@ -392,11 +373,6 @@ func deserializeInvoice(r io.Reader) (*Invoice, error) {
 		return nil, err
 	}
 	invoice.Receipt, err = wire.ReadVarBytes(r, 0, MaxReceiptSize, "")
-	if err != nil {
-		return nil, err
-	}
-
-	invoice.Description, err = wire.ReadVarBytes(r, 0, MaxDescriptionSize, "")
 	if err != nil {
 		return nil, err
 	}
