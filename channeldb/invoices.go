@@ -44,8 +44,10 @@ const (
 	// within the database along side incoming/outgoing invoices.
 	MaxReceiptSize = 1024
 
-	// DescriptionHashSize is the size of a SHA256 description hash.
-	DescriptionHashSize = 32
+	// MaxPaymentRequestSize is the max size of a a payment request for
+	// this invoice.
+	// TODO: set
+	MaxPaymentRequestSize = 4096
 )
 
 // ContractTerm is a companion struct to the Invoice struct. This struct houses
@@ -89,10 +91,9 @@ type Invoice struct {
 	// TODO(roasbeef): document scheme.
 	Receipt []byte
 
-	// DescriptionHash is an optional field, a SHA-256 hash of a description
-	// of the payment. It is stored here in order for us to be able to
-	// recreate the encoded payment request.
-	DescriptionHash []byte
+	// PaymentRequest is an optional field where a payment request created
+	// for this invoice can be stored.
+	PaymentRequest []byte
 
 	// CreationDate is the exact time the invoice was created.
 	CreationDate time.Time
@@ -116,10 +117,10 @@ func validateInvoice(i *Invoice) error {
 			"of length %v was provided", MaxReceiptSize,
 			len(i.Receipt))
 	}
-	if len(i.DescriptionHash) > 0 &&
-		len(i.DescriptionHash) != DescriptionHashSize {
-		return fmt.Errorf("length of description hash must be exactly "+
-			"%v, was %v", DescriptionHashSize, len(i.DescriptionHash))
+	if len(i.PaymentRequest) > MaxPaymentRequestSize {
+		return fmt.Errorf("max length of payment request is %v, length "+
+			"provided was %v", MaxPaymentRequestSize,
+			len(i.PaymentRequest))
 	}
 	return nil
 }
@@ -319,7 +320,7 @@ func serializeInvoice(w io.Writer, i *Invoice) error {
 	if err := wire.WriteVarBytes(w, 0, i.Receipt[:]); err != nil {
 		return err
 	}
-	if err := wire.WriteVarBytes(w, 0, i.DescriptionHash[:]); err != nil {
+	if err := wire.WriteVarBytes(w, 0, i.PaymentRequest[:]); err != nil {
 		return err
 	}
 
@@ -377,7 +378,7 @@ func deserializeInvoice(r io.Reader) (*Invoice, error) {
 		return nil, err
 	}
 
-	invoice.DescriptionHash, err = wire.ReadVarBytes(r, 0, DescriptionHashSize, "")
+	invoice.PaymentRequest, err = wire.ReadVarBytes(r, 0, MaxPaymentRequestSize, "")
 	if err != nil {
 		return nil, err
 	}

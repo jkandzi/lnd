@@ -1294,6 +1294,15 @@
           "type": "string",
           "format": "byte",
           "description": "*\nHash (SHA256) of a description of the payment. Used if the description of\npayment (memo) is too long to naturally fit within the description field\nof an encoded invoice."
+        },
+        "expiry": {
+          "type": "string",
+          "format": "int64",
+          "description": "/ Invoice expiry time in seconds. Default is 3600 (1 hour) if not specified."
+        },
+        "fallback_addr": {
+          "type": "string",
+          "description": "/ Fallback on-chain address."
         }
       }
     },

@@ -917,6 +917,17 @@ var addInvoiceCommand = cli.Command{
 				"used instead of the description(memo) field in " +
 				"the encoded invoice.",
 		},
+		cli.StringFlag{
+			Name: "fallback_addr",
+			Usage: "fallback on-chain address that can be used in " +
+				"case the lightning payment fails",
+		},
+		cli.Int64Flag{
+			Name: "expiry",
+			Usage: "the invoice's expiry time in seconds. If not " +
+				"specified an expiry of 3600 seconds (1 hour) " +
+				"is implied.",
+		},
 	},
 	Action: addInvoice,
 }
@@ -975,6 +986,8 @@ func addInvoice(ctx *cli.Context) error {
 		RPreimage:       preimage,
 		Value:           value,
 		DescriptionHash: descHash,
+		FallbackAddr:    ctx.String("fallback_addr"),
+		Expiry:          ctx.Int64("expiry"),
 	}
 
 	resp, err := client.AddInvoice(context.Background(), invoice)

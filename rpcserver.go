@@ -1760,10 +1760,9 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 		return nil, fmt.Errorf("receipt too large: %v bytes "+
 			"(maxsize=%v)", len(invoice.Receipt), channeldb.MaxReceiptSize)
 	}
-	if len(invoice.DescriptionHash) > 0 &&
-		len(invoice.DescriptionHash) != channeldb.DescriptionHashSize {
+	if len(invoice.DescriptionHash) > 0 && len(invoice.DescriptionHash) != 32 {
 		return nil, fmt.Errorf("description hash is %v bytes, must be %v",
-			len(invoice.DescriptionHash), channeldb.DescriptionHashSize)
+			len(invoice.DescriptionHash), channeldb.MaxPaymentRequestSize)
 	}
 
 	amt := btcutil.Amount(invoice.Value)
@@ -1780,17 +1779,6 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 			"payment allowed is %v", amt, maxPaymentMSat.ToSatoshis())
 	}
 
-	i := &channeldb.Invoice{
-		CreationDate:    time.Now(),
-		Memo:            []byte(invoice.Memo),
-		Receipt:         invoice.Receipt,
-		DescriptionHash: invoice.DescriptionHash,
-		Terms: channeldb.ContractTerm{
-			Value: amtMSat,
-		},
-	}
-	copy(i.Terms.PaymentPreimage[:], paymentPreimage[:])
-
 	// Next, generate the payment hash itself from the preimage. This will
 	// be used by clients to query for the state of a particular invoice.
 	rHash := sha256.Sum256(paymentPreimage[:])
@@ -1798,9 +1786,31 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 	// We also create an encoded payment request which allows the
 	// caller to compactly send the invoice to the payer. We'll create a
 	// list of options to be added to the encoded invoice. For now we only
-	// support the required fields description/description_hash, and the
-	// amount field.
+	// support the required fields description/description_hash, expiry,
+	// fallback address, and the amount field.
 	var options []func(*zpay32.Invoice)
+
+	// Add the amount. This field is optional by the BOLT-11 format, but
+	// we require it for now.
+	options = append(options, zpay32.Amount(amtMSat))
+
+	// If specified, add a fallback address to the invoice.
+	if len(invoice.FallbackAddr) > 0 {
+		addr, err := btcutil.DecodeAddress(invoice.FallbackAddr,
+			activeNetParams.Params)
+		if err != nil {
+			return nil, fmt.Errorf("invalid fallback address: %v",
+				err)
+		}
+		options = append(options, zpay32.FallbackAddr(addr))
+	}
+
+	// If expiry is set, specify it. If it is not provided, then expiry will
+	// default to 3600 seconds.
+	if invoice.Expiry > 0 {
+		exp := time.Unix(invoice.Expiry, 0)
+		options = append(options, zpay32.Expiry(exp))
+	}
 
 	// If the description hash is set, then we add it do the list of options.
 	// If not, use the memo field as the invoice description.
@@ -1814,14 +1824,11 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 		options = append(options, zpay32.Description(invoice.Memo))
 	}
 
-	// Add the amount. This field is optional by the BOLT-11 format, but
-	// we require it for now.
-	options = append(options, zpay32.Amount(amtMSat))
-
+	creationDate := time.Now()
 	payReq, err := zpay32.NewInvoice(
 		activeNetParams.Params,
 		rHash,
-		i.CreationDate,
+		creationDate,
 		options...,
 	)
 	if err != nil {
@@ -1836,6 +1843,17 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+
+	i := &channeldb.Invoice{
+		CreationDate:   creationDate,
+		Memo:           []byte(invoice.Memo),
+		Receipt:        invoice.Receipt,
+		PaymentRequest: []byte(payReqString),
+		Terms: channeldb.ContractTerm{
+			Value: amtMSat,
+		},
+	}
+	copy(i.Terms.PaymentPreimage[:], paymentPreimage[:])
 
 	rpcsLog.Tracef("[addinvoice] adding new invoice %v",
 		newLogClosure(func() string {
@@ -1913,9 +1931,9 @@ func (r *rpcServer) LookupInvoice(ctx context.Context,
 	var options []func(*zpay32.Invoice)
 	options = append(options, zpay32.Amount(mSat))
 
-	if len(invoice.DescriptionHash) > 0 {
+	if len(invoice.PaymentRequest) > 0 {
 		var descHash [32]byte
-		copy(descHash[:], invoice.DescriptionHash[:])
+		copy(descHash[:], invoice.PaymentRequest[:])
 		options = append(options, zpay32.DescriptionHash(descHash))
 	} else {
 		options = append(options, zpay32.Description(string(invoice.Memo)))
@@ -1974,39 +1992,6 @@ func (r *rpcServer) ListInvoices(ctx context.Context,
 		invoiceAmount := dbInvoice.Terms.Value.ToSatoshis()
 		paymentPreimge := dbInvoice.Terms.PaymentPreimage[:]
 		rHash := sha256.Sum256(paymentPreimge)
-		mSat := lnwire.NewMSatFromSatoshis(invoiceAmount)
-
-		// With the invoice information found in the DB we can recreate
-		// the encoded invoice.
-		var options []func(*zpay32.Invoice)
-
-		if len(dbInvoice.DescriptionHash) > 0 {
-			var descHash [32]byte
-			copy(descHash[:], dbInvoice.DescriptionHash[:])
-			options = append(options, zpay32.DescriptionHash(descHash))
-		} else {
-			options = append(options, zpay32.Description(string(dbInvoice.Memo)))
-		}
-		options = append(options, zpay32.Amount(mSat))
-
-		payReq, err := zpay32.NewInvoice(
-			activeNetParams.Params,
-			sha256.Sum256(paymentPreimge),
-			dbInvoice.CreationDate,
-			options...,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		payReqString, err := payReq.Encode(
-			zpay32.MessageSigner{
-				SignCompact: r.server.nodeSigner.SignDigestCompact,
-			},
-		)
-		if err != nil {
-			return nil, err
-		}
 
 		invoice := &lnrpc.Invoice{
 			Memo:           string(dbInvoice.Memo[:]),
@@ -2016,7 +2001,7 @@ func (r *rpcServer) ListInvoices(ctx context.Context,
 			Value:          int64(invoiceAmount),
 			Settled:        dbInvoice.Terms.Settled,
 			CreationDate:   dbInvoice.CreationDate.Unix(),
-			PaymentRequest: payReqString,
+			PaymentRequest: string(dbInvoice.PaymentRequest[:]),
 		}
 
 		invoices[i] = invoice

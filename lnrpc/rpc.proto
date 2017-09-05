@@ -1173,6 +1173,12 @@ message Invoice {
     of an encoded invoice.
     */
     bytes description_hash = 10 [json_name = "description_hash"];
+
+    /// Invoice expiry time in seconds. Default is 3600 (1 hour) if not specified.
+    int64 expiry = 11 [json_name = "expiry"];
+
+    /// Fallback on-chain address.
+    string fallback_addr = 12 [json_name = "fallback_addr"];
 }
 message AddInvoiceResponse {
     bytes r_hash = 1 [json_name = "r_hash"];
