@@ -1174,7 +1174,7 @@ message Invoice {
     */
     bytes description_hash = 10 [json_name = "description_hash"];
 
-    /// Invoice expiry time in seconds. Default is 3600 (1 hour) if not specified.
+    /// Invoice expiry time in seconds. Default is 3600 (1 hour).
     int64 expiry = 11 [json_name = "expiry"];
 
     /// Fallback on-chain address.
@@ -1258,8 +1258,11 @@ message PayReq {
     string destination = 1 [json_name = "destination"];
     string payment_hash = 2 [json_name = "payment_hash"];
     int64 num_satoshis = 3 [json_name = "num_satoshis"];
-    string description = 4 [json_name = "description"];
-    string description_hash = 5 [json_name = "description_hash"];
+    int64 timestamp = 4 [json_name = "timestamp"];
+    int64 expiry = 5 [json_name = "expiry"];
+    string description = 6 [json_name = "description"];
+    string description_hash = 7 [json_name = "description_hash"];
+    string fallback_addr = 8 [json_name = "fallback_addr"];
 }
 
 message FeeReportRequest {}

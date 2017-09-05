@@ -1298,7 +1298,7 @@
         "expiry": {
           "type": "string",
           "format": "int64",
-          "description": "/ Invoice expiry time in seconds. Default is 3600 (1 hour) if not specified."
+          "description": "/ Invoice expiry time in seconds. Default is 3600 (1 hour)."
         },
         "fallback_addr": {
           "type": "string",
@@ -1543,10 +1543,21 @@
           "type": "string",
           "format": "int64"
         },
+        "timestamp": {
+          "type": "string",
+          "format": "int64"
+        },
+        "expiry": {
+          "type": "string",
+          "format": "int64"
+        },
         "description": {
           "type": "string"
         },
         "description_hash": {
+          "type": "string"
+        },
+        "fallback_addr": {
           "type": "string"
         }
       }

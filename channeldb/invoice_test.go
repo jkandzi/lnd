@@ -29,14 +29,15 @@ func randInvoice(value lnwire.MilliSatoshi) (*Invoice, error) {
 	i.Memo = []byte("memo")
 	i.Receipt = []byte("recipt")
 
-	// Create random 32 bytes, and randomly set the description
-	// hash based on one of the random bits.
-	var hash [32]byte
-	if _, err := rand.Read(hash[:]); err != nil {
+	// Create a random byte slice of MaxPaymentRequestSize bytes to be used
+	// as a dummy paymentrequest, and  determine if it should be set based
+	// on one of the random bytes.
+	var r [MaxPaymentRequestSize]byte
+	if _, err := rand.Read(r[:]); err != nil {
 		return nil, err
 	}
-	if hash[0]&1 == 0 {
-		i.PaymentRequest = hash[:]
+	if r[0]&1 == 0 {
+		i.PaymentRequest = r[:]
 	} else {
 		i.PaymentRequest = []byte("")
 	}

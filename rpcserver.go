@@ -2829,8 +2829,7 @@ func (r *rpcServer) DecodePayReq(ctx context.Context,
 		return nil, err
 	}
 
-	// Only one of the description and description hash fields will be set
-	// in a valid invoice, so just let the other default to an empty string.
+	// Let the fields default to empty strings.
 	desc := ""
 	if payReq.Description != nil {
 		desc = *payReq.Description
@@ -2841,13 +2840,28 @@ func (r *rpcServer) DecodePayReq(ctx context.Context,
 		descHash = payReq.DescriptionHash[:]
 	}
 
+	fallbackAddr := ""
+	if payReq.FallbackAddr != nil {
+		fallbackAddr = payReq.FallbackAddr.String()
+	}
+
+	// Expiry time should default to 3600 seconds if not specified
+	// explicitly.
+	expiry := int64(3600)
+	if payReq.Expiry != nil {
+		expiry = payReq.Expiry.Unix()
+	}
+
 	dest := payReq.Destination.SerializeCompressed()
 	return &lnrpc.PayReq{
 		Destination:     hex.EncodeToString(dest),
 		PaymentHash:     hex.EncodeToString(payReq.PaymentHash[:]),
 		NumSatoshis:     int64(payReq.MilliSat.ToSatoshis()),
+		Timestamp:       payReq.Timestamp.Unix(),
 		Description:     desc,
 		DescriptionHash: hex.EncodeToString(descHash[:]),
+		FallbackAddr:    fallbackAddr,
+		Expiry:          expiry,
 	}, nil
 }
 
