@@ -1733,8 +1733,8 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 		copy(paymentPreimage[:], invoice.RPreimage[:])
 	}
 
-	// The size of the memo, receipt, description and description hash
-	// attached must not exceed the maximum values for either of the fields.
+	// The size of the memo, receipt and description hash attached must not
+	// exceed the maximum values for either of the fields.
 	if len(invoice.Memo) > channeldb.MaxMemoSize {
 		return nil, fmt.Errorf("memo too large: %v bytes "+
 			"(maxsize=%v)", len(invoice.Memo), channeldb.MaxMemoSize)
@@ -1957,9 +1957,10 @@ func (r *rpcServer) ListInvoices(ctx context.Context,
 		invoiceAmount := dbInvoice.Terms.Value.ToSatoshis()
 		paymentPreimge := dbInvoice.Terms.PaymentPreimage[:]
 		rHash := sha256.Sum256(paymentPreimge)
-
 		mSat := lnwire.NewMSatFromSatoshis(invoiceAmount)
 
+		// With the invoice information found in the DB we can recreate
+		// the encoded invoice.
 		var options []func(*zpay32.Invoice)
 
 		if len(dbInvoice.DescriptionHash) > 0 {
@@ -2826,6 +2827,8 @@ func (r *rpcServer) DecodePayReq(ctx context.Context,
 		return nil, err
 	}
 
+	// Only one of the description and description hash fields will be set
+	// in a valid invoice, so just let the other default to an empty string.
 	desc := ""
 	if payReq.Description != nil {
 		desc = *payReq.Description

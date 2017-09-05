@@ -20,7 +20,6 @@ func makeFakePayment() *OutgoingPayment {
 		CreationDate:    time.Unix(time.Now().Unix(), 0),
 		Memo:            []byte("fake memo"),
 		Receipt:         []byte("fake receipt"),
-		Description:     []byte("fake desc"),
 		DescriptionHash: []byte(""),
 	}
 
@@ -71,10 +70,6 @@ func makeRandomFakePayment() (*OutgoingPayment, error) {
 		return nil, err
 	}
 
-	fakeInvoice.Description, err = randomBytes(1, 50)
-	if err != nil {
-		return nil, err
-	}
 	fakeInvoice.DescriptionHash = []byte("")
 
 	preImg, err := randomBytes(32, 33)

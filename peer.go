@@ -719,10 +719,10 @@ func (p *peer) logWireMessage(msg lnwire.Message, read bool) {
 	case *lnwire.RevokeAndAck:
 		m.NextRevocationKey.Curve = nil
 	case *lnwire.NodeAnnouncement:
-		// m.NodeID.Curve = nil
+		m.NodeID.Curve = nil
 	case *lnwire.ChannelAnnouncement:
-		// m.NodeID1.Curve = nil
-		// m.NodeID2.Curve = nil
+		m.NodeID1.Curve = nil
+		m.NodeID2.Curve = nil
 		m.BitcoinKey1.Curve = nil
 		m.BitcoinKey2.Curve = nil
 	case *lnwire.AcceptChannel:

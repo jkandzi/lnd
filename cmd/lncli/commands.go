@@ -954,6 +954,7 @@ func addInvoice(ctx *cli.Context) error {
 	case args.Present():
 		preimage, err = hex.DecodeString(args.First())
 	}
+
 	if err != nil {
 		return fmt.Errorf("unable to parse preimage: %v", err)
 	}

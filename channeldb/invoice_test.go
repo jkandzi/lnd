@@ -29,18 +29,16 @@ func randInvoice(value lnwire.MilliSatoshi) (*Invoice, error) {
 	i.Memo = []byte("memo")
 	i.Receipt = []byte("recipt")
 
-	// Create random 32 bytes, and set either description or description
-	// hash based on on of the random bits.
+	// Create random 32 bytes, and randomly set the description
+	// hash based on one of the random bits.
 	var hash [32]byte
 	if _, err := rand.Read(hash[:]); err != nil {
 		return nil, err
 	}
 	if hash[0]&1 == 0 {
-		i.Description = []byte("description")
-		i.DescriptionHash = []byte("")
-	} else {
-		i.Description = []byte("")
 		i.DescriptionHash = hash[:]
+	} else {
+		i.DescriptionHash = []byte("")
 	}
 
 	return i, nil
@@ -64,7 +62,6 @@ func TestInvoiceWorkflow(t *testing.T) {
 	}
 	fakeInvoice.Memo = []byte("memo")
 	fakeInvoice.Receipt = []byte("recipt")
-	fakeInvoice.Description = []byte("fake description")
 	fakeInvoice.DescriptionHash = []byte("")
 	copy(fakeInvoice.Terms.PaymentPreimage[:], rev[:])
 	fakeInvoice.Terms.Value = lnwire.NewMSatFromSatoshis(10000)

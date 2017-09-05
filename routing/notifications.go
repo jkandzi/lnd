@@ -296,7 +296,7 @@ func addToTopologyChange(graph *channeldb.ChannelGraph, update *TopologyChange,
 			IdentityKey: m.PubKey,
 			Alias:       m.Alias,
 		}
-		// nodeUpdate.IdentityKey.Curve = nil
+		nodeUpdate.IdentityKey.Curve = nil
 
 		update.NodeUpdates = append(update.NodeUpdates, nodeUpdate)
 		return nil
@@ -338,8 +338,8 @@ func addToTopologyChange(graph *channeldb.ChannelGraph, update *TopologyChange,
 			AdvertisingNode: sourceNode,
 			ConnectingNode:  connectingNode,
 		}
-		// edgeUpdate.AdvertisingNode.Curve = nil
-		// edgeUpdate.ConnectingNode.Curve = nil
+		edgeUpdate.AdvertisingNode.Curve = nil
+		edgeUpdate.ConnectingNode.Curve = nil
 
 		// TODO(roasbeef): add bit to toggle
 		update.ChannelEdgeUpdates = append(update.ChannelEdgeUpdates,
