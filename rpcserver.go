@@ -1473,6 +1473,18 @@ func (r *rpcServer) SendPayment(paymentStream lnrpc.Lightning_SendPaymentServer)
 						return
 					}
 					nextPayment.Amt = int64(payReq.MilliSat.ToSatoshis())
+
+					if payReq.PaymentHash == nil {
+						err := fmt.Errorf("invoice " +
+							"invalid, no payment " +
+							"hash specified")
+						select {
+						case errChan <- err:
+						case <-reqQuit:
+							return
+						}
+						return
+					}
 					nextPayment.PaymentHash = payReq.PaymentHash[:]
 				}
 
@@ -1632,6 +1644,11 @@ func (r *rpcServer) SendPaymentSync(ctx context.Context,
 				"specified not currently supported")
 		}
 		amt = payReq.MilliSat.ToSatoshis()
+
+		if payReq.PaymentHash == nil {
+			return nil, fmt.Errorf("invoice invalid, no payment " +
+				"hash specified")
+		}
 		rHash = *payReq.PaymentHash
 
 		// Otherwise, the payment conditions have been manually
