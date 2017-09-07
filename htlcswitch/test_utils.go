@@ -449,7 +449,7 @@ func (n *threeHopNetwork) makePayment(sendingPeer, receivingPeer Peer,
 	select {
 	case err := <-errChan:
 		return invoice, err
-	case <-time.After(5 * time.Minute):
+	case <-time.After(15 * time.Second):
 		return invoice, errors.New("htlc was not settled in time")
 	}
 }
