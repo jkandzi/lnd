@@ -1493,6 +1493,7 @@ func (f *fundingManager) waitForFundingConfirmation(completeChan *channeldb.Open
 	case <-f.quit:
 		return
 	}
+	confChan <- &shortChanID
 }
 
 // handleFundingConfirmation is a wrapper method for creating a new
