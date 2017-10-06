@@ -1,0 +1,4 @@
+panic: Deserialized message and original message are not deeply equal.
+github.com/lightningnetwork/lnd/lnwire/johan.Fuzz
+go-fuzz-dep.Main
+main.main
