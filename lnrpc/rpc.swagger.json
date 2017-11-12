@@ -1581,10 +1581,10 @@
           "format": "int64",
           "title": "/ The number of satoshis to push to the remote side as part of the initial commitment state"
         },
-        "private": {
+        "announce": {
           "type": "boolean",
           "format": "boolean",
-          "title": "*\nWhether this channel is private and if so, should not be announced to the\ngreater network"
+          "title": "/ Whether this channel should be announced to the greater network"
         }
       }
     },

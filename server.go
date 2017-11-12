@@ -1415,9 +1415,8 @@ type openChanReq struct {
 	localFundingAmt  btcutil.Amount
 	remoteFundingAmt btcutil.Amount
 
-	pushAmt lnwire.MilliSatoshi
-
-	private bool
+	pushAmt      lnwire.MilliSatoshi
+	announceChan bool
 
 	// TODO(roasbeef): add ability to specify channel constraints as well
 
@@ -1536,7 +1535,7 @@ func (s *server) DisconnectPeer(pubKey *btcec.PublicKey) error {
 // NOTE: This function is safe for concurrent access.
 func (s *server) OpenChannel(peerID int32, nodeKey *btcec.PublicKey,
 	localAmt btcutil.Amount, pushAmt lnwire.MilliSatoshi,
-	private bool) (chan *lnrpc.OpenStatusUpdate, chan error) {
+	announceChan bool) (chan *lnrpc.OpenStatusUpdate, chan error) {
 
 	updateChan := make(chan *lnrpc.OpenStatusUpdate, 1)
 	errChan := make(chan error, 1)
@@ -1579,7 +1578,7 @@ func (s *server) OpenChannel(peerID int32, nodeKey *btcec.PublicKey,
 		chainHash:       *activeNetParams.GenesisHash,
 		localFundingAmt: localAmt,
 		pushAmt:         pushAmt,
-		private:         private,
+		announceChan:    announceChan,
 		updates:         updateChan,
 		err:             errChan,
 	}
