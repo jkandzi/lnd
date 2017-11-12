@@ -298,6 +298,10 @@ type OpenChannel struct {
 	// for normal transactional use.
 	NumConfsRequired uint16
 
+	// ChannelFlags holds the flags that were sent as part of the
+	// open_channel message.
+	ChannelFlags lnwire.FundingFlag
+
 	// RemoteCurrentRevocation is the current revocation for their
 	// commitment transaction. However, since this the derived public key,
 	// we don't yet have the private key so we aren't yet able to verify
@@ -1897,6 +1901,11 @@ func putChanFundingInfo(nodeChanBucket *bolt.Bucket, channel *OpenChannel) error
 		return err
 	}
 
+	flags := [1]byte{byte(channel.ChannelFlags)}
+	if _, err := b.Write(flags[:]); err != nil {
+		return err
+	}
+
 	return nodeChanBucket.Put(fundTxnKey, b.Bytes())
 }
 
@@ -1949,6 +1958,12 @@ func fetchChanFundingInfo(nodeChanBucket *bolt.Bucket, channel *OpenChannel) err
 		return err
 	}
 	channel.NumConfsRequired = byteOrder.Uint16(scratch[:])
+
+	var flags [1]byte
+	if _, err := infoBytes.Read(flags[:]); err != nil {
+		return err
+	}
+	channel.ChannelFlags = lnwire.FundingFlag(flags[0])
 
 	return nil
 }

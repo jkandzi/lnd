@@ -149,7 +149,7 @@ func openChannelAndAssert(ctx context.Context, t *harnessTest, net *networkHarne
 	// Mine a block, then wait for Alice's node to notify us that the
 	// channel has been opened. The funding transaction should be found
 	// within the newly mined block.
-	block := mineBlocks(t, net, 6)[0]
+	block := mineBlocks(t, net, 1)[0]
 
 	fundingChanPoint, err := net.WaitForChannelOpen(ctx, chanOpenUpdate)
 	if err != nil {
@@ -609,7 +609,7 @@ func testDisconnectingTargetPeer(net *networkHarness, t *harnessTest) {
 
 	// Create a new channel that requires 1 confs before it's considered
 	// open, then broadcast the funding transaction
-	const numConfs = 6
+	const numConfs = 1
 	pendingUpdate, err := net.OpenPendingChannel(ctxt, net.Alice, net.Bob,
 		chanAmt, pushAmt)
 	if err != nil {
@@ -727,7 +727,7 @@ func testChannelFundingPersistence(net *networkHarness, t *harnessTest) {
 	// As we need to create a channel that requires more than 1
 	// confirmation before it's open, with the current set of defaults,
 	// we'll need to create a new node instance.
-	const numConfs = 6
+	const numConfs = 5
 	carolArgs := []string{fmt.Sprintf("--defaultchanconfs=%v", numConfs)}
 	carol, err := net.NewNode(carolArgs)
 	if err != nil {
@@ -738,7 +738,7 @@ func testChannelFundingPersistence(net *networkHarness, t *harnessTest) {
 		t.Fatalf("unable to connect alice to carol: %v", err)
 	}
 
-	// Create a new channel that requires 6 confs before it's considered
+	// Create a new channel that requires 5 confs before it's considered
 	// open, then broadcast the funding transaction
 	ctxt, _ = context.WithTimeout(ctxb, timeout)
 	pendingUpdate, err := net.OpenPendingChannel(ctxt, net.Alice, carol,
@@ -807,7 +807,7 @@ peersPoll:
 
 	// Next, mine enough blocks s.t the channel will open with a single
 	// additional block mined.
-	if _, err := net.Miner.Node.Generate(4); err != nil {
+	if _, err := net.Miner.Node.Generate(3); err != nil {
 		t.Fatalf("unable to mine blocks: %v", err)
 	}
 
@@ -945,7 +945,7 @@ func testChannelForceClosure(net *networkHarness, t *harnessTest) {
 	// First establish a channel with a capacity of 100k satoshis between
 	// Alice and Bob. We also push 50k satoshis of the initial amount
 	// towards Bob.
-	numFundingConfs := uint32(6)
+	numFundingConfs := uint32(1)
 	chanAmt := btcutil.Amount(10e4)
 	pushAmt := btcutil.Amount(5e4)
 	chanOpenUpdate, err := net.OpenChannel(ctxb, net.Alice, net.Bob,
@@ -1444,17 +1444,14 @@ func testMultiHopPayments(net *networkHarness, t *harnessTest) {
 	const chanAmt = btcutil.Amount(100000)
 	ctxb := context.Background()
 	timeout := time.Duration(time.Second * 5)
+	var networkChans []*lnrpc.ChannelPoint
 
 	// Open a channel with 100k satoshis between Alice and Bob with Alice
 	// being the sole funder of the channel.
 	ctxt, _ := context.WithTimeout(ctxb, timeout)
 	chanPointAlice := openChannelAndAssert(ctxt, t, net, net.Alice,
 		net.Bob, chanAmt, 0)
-	ctxt, _ = context.WithTimeout(ctxb, timeout)
-	err := net.Alice.WaitForNetworkChannelOpen(ctxt, chanPointAlice)
-	if err != nil {
-		t.Fatalf("alice didn't advertise her channel: %v", err)
-	}
+	networkChans = append(networkChans, chanPointAlice)
 
 	aliceChanTXID, err := chainhash.NewHash(chanPointAlice.FundingTxid)
 	if err != nil {
@@ -1486,7 +1483,7 @@ func testMultiHopPayments(net *networkHarness, t *harnessTest) {
 	ctxt, _ = context.WithTimeout(ctxb, timeout)
 	chanPointDave := openChannelAndAssert(ctxt, t, net, dave,
 		net.Alice, chanAmt, 0)
-	ctxt, _ = context.WithTimeout(ctxb, timeout)
+	networkChans = append(networkChans, chanPointDave)
 	daveChanTXID, err := chainhash.NewHash(chanPointDave.FundingTxid)
 	if err != nil {
 		t.Fatalf("unable to create sha hash: %v", err)
@@ -1512,7 +1509,8 @@ func testMultiHopPayments(net *networkHarness, t *harnessTest) {
 	ctxt, _ = context.WithTimeout(ctxb, timeout)
 	chanPointCarol := openChannelAndAssert(ctxt, t, net, carol,
 		dave, chanAmt, 0)
-	ctxt, _ = context.WithTimeout(ctxb, timeout)
+	networkChans = append(networkChans, chanPointCarol)
+
 	carolChanTXID, err := chainhash.NewHash(chanPointCarol.FundingTxid)
 	if err != nil {
 		t.Fatalf("unable to create sha hash: %v", err)
@@ -1520,6 +1518,22 @@ func testMultiHopPayments(net *networkHarness, t *harnessTest) {
 	carolFundPoint := wire.OutPoint{
 		Hash:  *carolChanTXID,
 		Index: chanPointCarol.OutputIndex,
+	}
+
+	// Since channels won't be announced to the public network before they
+	// have reached 6 confirmations, we mine 6 blocks to make sure
+	// everybody has heard about the channels.
+	_ = mineBlocks(t, net, 6)
+
+	// Wait for all nodes to have seen all channels.
+	for _, chanPoint := range networkChans {
+		for _, node := range []*lightningNode{net.Alice, net.Bob, carol, dave} {
+			ctxt, _ = context.WithTimeout(ctxb, timeout)
+			err = node.WaitForNetworkChannelOpen(ctxt, chanPoint)
+			if err != nil {
+				t.Fatalf("timeout waiting for channel open: %v", err)
+			}
+		}
 	}
 
 	// Create 5 invoices for Bob, which expect a payment from Carol for 1k
@@ -1890,7 +1904,7 @@ func testMaxPendingChannels(net *networkHarness, t *harnessTest) {
 	// Mine a block, then wait for node's to notify us that the channel has
 	// been opened. The funding transactions should be found within the
 	// newly mined block.
-	block := mineBlocks(t, net, 6)[0]
+	block := mineBlocks(t, net, 1)[0]
 
 	chanPoints := make([]*lnrpc.ChannelPoint, maxPendingChannels)
 	for i, stream := range openStreams {
@@ -2887,6 +2901,9 @@ func testHtlcErrorPropagation(net *networkHarness, t *harnessTest) {
 	chanPointBob := openChannelAndAssert(ctxt, t, net, net.Bob, carol,
 		chanAmt, 0)
 
+	// Mine blocks for node announcement to propagate.
+	_ = mineBlocks(t, net, 6)
+
 	// Ensure that Alice has Carol in her routing table before proceeding.
 	nodeInfoReq := &lnrpc.NodeInfoRequest{
 		PubKey: carol.PubKeyStr,
@@ -3149,6 +3166,8 @@ func testGraphTopologyNotifications(net *networkHarness, t *harnessTest) {
 	chanPoint := openChannelAndAssert(ctxt, t, net, net.Alice, net.Bob,
 		chanAmt, 0)
 
+	_ = mineBlocks(t, net, 6)
+
 	// We'll launch a goroutine that'll be responsible for proxying all
 	// notifications recv'd from the client into the channel below.
 	quit := make(chan struct{})
@@ -3289,6 +3308,8 @@ func testGraphTopologyNotifications(net *networkHarness, t *harnessTest) {
 	chanPoint = openChannelAndAssert(ctxt, t, net, net.Bob, carol,
 		chanAmt, 0)
 
+	// Mine enough blocks for node announcements to be propagated.
+	_ = mineBlocks(t, net, 6)
 	time.Sleep(time.Millisecond * 300)
 
 	// Reconnect Alice and Bob. This should result in the nodes syncing up
@@ -3389,6 +3410,9 @@ func testNodeAnnouncement(net *networkHarness, t *harnessTest) {
 	chanPoint := openChannelAndAssert(ctxt, t, net, net.Bob, dave,
 		1000000, 0)
 
+	// For node announcements to propagate, the funding tx must be at least
+	// 6 blocks deep.
+	_ = mineBlocks(t, net, 6)
 	time.Sleep(time.Millisecond * 300)
 
 	// When Alice now connects with Dave, Alice will get his node announcement.

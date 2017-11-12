@@ -329,8 +329,10 @@ var openChannelCommand = cli.Command{
 			Usage: "block and wait until the channel is fully open",
 		},
 		cli.BoolFlag{
-			Name:  "private",
-			Usage: "don't announce channel to the greater network",
+			Name: "announce",
+			Usage: "announce channel to the greater network, such " +
+				"that it can be used by other nodes to route " +
+				"payments through",
 		},
 	},
 	Action: openChannel,
@@ -400,7 +402,12 @@ func openChannel(ctx *cli.Context) error {
 		}
 	}
 
-	req.Private = ctx.Bool("private")
+	if ctx.IsSet("announce") {
+		req.Announce = ctx.Bool("announce")
+	} else {
+		// TODO(halseth): make default be false.
+		req.Announce = true
+	}
 
 	stream, err := client.OpenChannel(ctxb, req)
 	if err != nil {

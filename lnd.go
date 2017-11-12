@@ -265,7 +265,7 @@ func lndMain() error {
 		CurrentNodeAnnouncement: func() (lnwire.NodeAnnouncement, error) {
 			return server.genNodeAnnouncement(true)
 		},
-		SendLocalAnnouncement: func(msg lnwire.Message) error {
+		SendAnnouncement: func(msg lnwire.Message) error {
 			errChan := server.authGossiper.ProcessLocalAnnouncement(msg,
 				idPrivKey.PubKey())
 			return <-errChan

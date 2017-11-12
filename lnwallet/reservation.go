@@ -236,6 +236,15 @@ func (r *ChannelReservation) SetNumConfsRequired(numConfs uint16) {
 	r.partialState.NumConfsRequired = numConfs
 }
 
+// SetChannelFlags sets the channel flags for this channel, as specified
+// in the open_channel message.
+func (r *ChannelReservation) SetChannelFlags(flags lnwire.FundingFlag) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.partialState.ChannelFlags = flags
+}
+
 // CommitConstraints takes the constraints that the remote party specifies for
 // the type of commitments that we can generate for them. These constraints
 // include several parameters that serve as flow control restricting the amount
