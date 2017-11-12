@@ -817,6 +817,10 @@ func TestFundingManagerNormalWorkflow(t *testing.T) {
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
+
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
 	// internal state machine.
@@ -854,10 +858,6 @@ func TestFundingManagerNormalWorkflow(t *testing.T) {
 	// Make sure the fundingManagers exchange announcement signatures.
 	assertAnnouncementSignatures(t, alice, bob)
 
-	// The funding process is now finished, wait for the
-	// OpenStatusUpdate_ChanOpen update
-	waitForOpenUpdate(t, updateChan)
-
 	// The internal state-machine should now have deleted the channelStates
 	// from the database, as the channel is announced.
 	assertNoChannelState(t, alice, bob, fundingOutPoint)
@@ -893,6 +893,10 @@ func TestFundingManagerRestartBehavior(t *testing.T) {
 	// Notify that transaction was mined
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
+
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
 
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
@@ -1014,6 +1018,10 @@ func TestFundingManagerOfflinePeer(t *testing.T) {
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
+
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
 	// internal state machine.
@@ -1102,10 +1110,6 @@ func TestFundingManagerOfflinePeer(t *testing.T) {
 	// signatures.
 	assertAnnouncementSignatures(t, alice, bob)
 
-	// The funding process is now finished, wait for the
-	// OpenStatusUpdate_ChanOpen update
-	waitForOpenUpdate(t, updateChan)
-
 	// The internal state-machine should now have deleted the channelStates
 	// from the database, as the channel is announced.
 	assertNoChannelState(t, alice, bob, fundingOutPoint)
@@ -1173,6 +1177,10 @@ func TestFundingManagerReceiveFundingLockedTwice(t *testing.T) {
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
+
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
 	// internal state machine.
@@ -1239,10 +1247,6 @@ func TestFundingManagerReceiveFundingLockedTwice(t *testing.T) {
 	// Make sure the fundingManagers exchange announcement signatures.
 	assertAnnouncementSignatures(t, alice, bob)
 
-	// The funding process is now finished, wait for the
-	// OpenStatusUpdate_ChanOpen update
-	waitForOpenUpdate(t, updateChan)
-
 	// The internal state-machine should now have deleted the channelStates
 	// from the database, as the channel is announced.
 	assertNoChannelState(t, alice, bob, fundingOutPoint)
@@ -1268,6 +1272,10 @@ func TestFundingManagerRestartAfterChanAnn(t *testing.T) {
 	// Notify that transaction was mined
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
+
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
 
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
@@ -1337,6 +1345,10 @@ func TestFundingManagerRestartAfterReceivingFundingLocked(t *testing.T) {
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
+
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
 	// internal state machine.
@@ -1405,6 +1417,10 @@ func TestFundingManagerPrivateChannel(t *testing.T) {
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
+
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
 	// internal state machine.
@@ -1452,10 +1468,6 @@ func TestFundingManagerPrivateChannel(t *testing.T) {
 		// Expected
 	}
 
-	// The funding process is now finished, wait for the
-	// OpenStatusUpdate_ChanOpen update
-	waitForOpenUpdate(t, updateChan)
-
 	// The internal state-machine should now have deleted the channelStates
 	// from the database, as the channel is announced.
 	assertNoChannelState(t, alice, bob, fundingOutPoint)
@@ -1482,6 +1494,10 @@ func TestFundingManagerPrivateRestart(t *testing.T) {
 	// Notify that transaction was mined
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
+
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
 
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their

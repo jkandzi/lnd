@@ -1209,9 +1209,9 @@ func (f *fundingManager) handleFundingCreated(fmsg *fundingCreatedMsg) {
 				return
 			}
 
+			// Success, funding transaction was confirmed.
 			f.deleteReservationCtx(peerKey, fmsg.msg.PendingChannelID)
 
-			// Success, funding transaction was confirmed.
 			err := f.handleFundingConfirmation(completeChan,
 				shortChanID)
 			if err != nil {
@@ -1336,9 +1336,7 @@ func (f *fundingManager) handleFundingSigned(fmsg *fundingSignedMsg) {
 			}
 		}
 
-		// Success, funding transaction was confirmed
-		f.deleteReservationCtx(peerKey, pendingChanID)
-
+		// Success, funding transaction was confirmed.
 		// Give the caller a final update notifying them that
 		// the channel is now open.
 		// TODO(roasbeef): only notify after recv of funding locked?
@@ -1352,6 +1350,7 @@ func (f *fundingManager) handleFundingSigned(fmsg *fundingSignedMsg) {
 				},
 			},
 		}
+		f.deleteReservationCtx(peerKey, pendingChanID)
 
 		// Go on adding the channel to the channel graph, and crafting
 		// channel announcements.
@@ -1574,6 +1573,9 @@ func (f *fundingManager) handleFundingConfirmation(completeChan *channeldb.OpenC
 	if err != nil {
 		return fmt.Errorf("failed adding to router graph: %v", err)
 	}
+
+	// TODO(halseth): Should send OpenStatusUpdate_ChanOpen first after
+	// channel is added to router graph?
 	err = f.annAfterSixConfs(completeChan, lnChannel, shortChanID)
 	if err != nil {
 		return fmt.Errorf("failed sending channel announcement: %v",
@@ -1614,6 +1616,7 @@ func (f *fundingManager) sendFundingLocked(completeChan *channeldb.OpenChannel,
 	// send fundingLocked until we succeed, or the fundingManager is shut
 	// down.
 	for {
+
 		err = f.cfg.SendToPeer(completeChan.IdentityPub,
 			fundingLockedMsg)
 		if err == nil {
@@ -1632,7 +1635,7 @@ func (f *fundingManager) sendFundingLocked(completeChan *channeldb.OpenChannel,
 		case <-connected:
 			// Retry sending.
 		case <-f.quit:
-			return nil
+			return fmt.Errorf("fundingManager shutting down")
 		}
 	}
 
