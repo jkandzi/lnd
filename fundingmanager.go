@@ -509,6 +509,10 @@ func (f *fundingManager) Start() error {
 					return
 				}
 
+				// TODO(halseth): should create a state machine
+				// that can more easily be resumed from
+				// different states, to avoid this code
+				// duplication.
 				err = f.annAfterSixConfs(channel,
 					lnChannel, shortChanID)
 				if err != nil {
@@ -1194,32 +1198,35 @@ func (f *fundingManager) handleFundingCreated(fmsg *fundingCreatedMsg) {
 		go f.waitForFundingWithTimeout(completeChan, confChan,
 			timeoutChan)
 
+		var shortChanID *lnwire.ShortChannelID
+		var ok bool
 		select {
 		case <-timeoutChan:
 			// We did not see the funding confirmation before
 			// timeout, so we forget the channel.
 			deleteFromDatabase()
+			return
 		case <-f.quit:
 			// The fundingManager is shutting down, will resume
 			// wait for funding transaction on startup.
-		case shortChanID, ok := <-confChan:
+			return
+		case shortChanID, ok = <-confChan:
 			if !ok {
 				fndgLog.Errorf("waiting for funding confirmation" +
 					" failed")
 				return
 			}
+		}
 
-			// Success, funding transaction was confirmed.
-			f.deleteReservationCtx(peerKey, fmsg.msg.PendingChannelID)
+		// Success, funding transaction was confirmed.
+		f.deleteReservationCtx(peerKey, fmsg.msg.PendingChannelID)
 
-			err := f.handleFundingConfirmation(completeChan,
-				shortChanID)
-			if err != nil {
-				fndgLog.Errorf("failed to handle funding"+
-					"confirmation: %v", err)
-				return
-			}
-
+		err := f.handleFundingConfirmation(completeChan,
+			shortChanID)
+		if err != nil {
+			fndgLog.Errorf("failed to handle funding"+
+				"confirmation: %v", err)
+			return
 		}
 	}()
 }
@@ -1325,6 +1332,7 @@ func (f *fundingManager) handleFundingSigned(fmsg *fundingSignedMsg) {
 		}()
 
 		var shortChanID *lnwire.ShortChannelID
+		var ok bool
 		select {
 		case <-f.quit:
 			return
