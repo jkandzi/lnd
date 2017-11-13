@@ -1216,6 +1216,7 @@ func (f *fundingManager) handleFundingCreated(fmsg *fundingCreatedMsg) {
 					" failed")
 				return
 			}
+			// Fallthrough.
 		}
 
 		// Success, funding transaction was confirmed.
@@ -1604,9 +1605,6 @@ func (f *fundingManager) handleFundingConfirmation(completeChan *channeldb.OpenC
 	if err != nil {
 		return fmt.Errorf("failed adding to router graph: %v", err)
 	}
-
-	// TODO(halseth): Should send OpenStatusUpdate_ChanOpen first after
-	// channel is added to router graph?
 	err = f.annAfterSixConfs(completeChan, lnChannel, shortChanID)
 	if err != nil {
 		return fmt.Errorf("failed sending channel announcement: %v",
@@ -1705,12 +1703,10 @@ func (f *fundingManager) addToRouterGraph(completeChan *channeldb.OpenChannel,
 	// Send ChannelAnnouncement and ChannelUpdate to the gossiper to add
 	// to the Router's topology.
 	if err = f.cfg.SendAnnouncement(ann.chanAnn); err != nil {
-		return fmt.Errorf("error sending private channel "+
-			"announcement: %v", err)
+		return fmt.Errorf("error channel announcement: %v", err)
 	}
 	if err = f.cfg.SendAnnouncement(ann.chanUpdateAnn); err != nil {
-		return fmt.Errorf("error sending private channel "+
-			"update: %v", err)
+		return fmt.Errorf("error sending channel update: %v", err)
 	}
 
 	// As the channel is now added to the ChannelRouter's topology, the
@@ -1760,6 +1756,8 @@ func (f *fundingManager) annAfterSixConfs(completeChan *channeldb.OpenChannel,
 					"complete funding flow for ChannelPoint(%v)",
 					completeChan.FundingOutpoint)
 			}
+			// Fallthrough.
+
 		case <-f.quit:
 			return fmt.Errorf("fundingManager shutting down, stopping funding "+
 				"flow for ChannelPoint(%v)", completeChan.FundingOutpoint)
