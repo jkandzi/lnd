@@ -373,6 +373,9 @@ func testBasicChannelFunding(net *networkHarness, t *harnessTest) {
 	chanPoint := openChannelAndAssert(ctxt, t, net, net.Alice, net.Bob,
 		chanAmt, pushAmt)
 
+	// Mine 6 blocks for all announcements to be propageted.
+	_ = mineBlocks(t, net, 6)
+
 	ctxt, _ = context.WithTimeout(ctxb, time.Second*15)
 	err := net.Alice.WaitForNetworkChannelOpen(ctxt, chanPoint)
 	if err != nil {
@@ -1170,6 +1173,9 @@ func testSingleHopInvoice(net *networkHarness, t *harnessTest) {
 	chanPoint := openChannelAndAssert(ctxt, t, net, net.Alice, net.Bob,
 		chanAmt, 0)
 
+	// Mine 6 blocks for all announcements to be propageted.
+	_ = mineBlocks(t, net, 6)
+
 	assertAmountSent := func(amt btcutil.Amount) {
 		// Both channels should also have properly accounted from the
 		// amount that has been sent/received over the channel.
@@ -1328,6 +1334,9 @@ func testListPayments(net *networkHarness, t *harnessTest) {
 	ctxt, _ := context.WithTimeout(ctxb, timeout)
 	chanPoint := openChannelAndAssert(ctxt, t, net, net.Alice, net.Bob,
 		chanAmt, 0)
+
+	// Mine 6 blocks for all announcements to be propageted.
+	_ = mineBlocks(t, net, 6)
 
 	// Now that the channel is open, create an invoice for Bob which
 	// expects a payment of 1000 satoshis from Alice paid via a particular
@@ -1901,10 +1910,10 @@ func testMaxPendingChannels(net *networkHarness, t *harnessTest) {
 	// with other tests we should clean up - complete opening of the
 	// channel and then close it.
 
-	// Mine a block, then wait for node's to notify us that the channel has
+	// Mine 6 blocks, then wait for node's to notify us that the channel has
 	// been opened. The funding transactions should be found within the
-	// newly mined block.
-	block := mineBlocks(t, net, 1)[0]
+	// first newly mined block.
+	block := mineBlocks(t, net, 6)[0]
 
 	chanPoints := make([]*lnrpc.ChannelPoint, maxPendingChannels)
 	for i, stream := range openStreams {
@@ -3166,6 +3175,7 @@ func testGraphTopologyNotifications(net *networkHarness, t *harnessTest) {
 	chanPoint := openChannelAndAssert(ctxt, t, net, net.Alice, net.Bob,
 		chanAmt, 0)
 
+	// Mine 6 blocks for all announcements to be propageted.
 	_ = mineBlocks(t, net, 6)
 
 	// We'll launch a goroutine that'll be responsible for proxying all

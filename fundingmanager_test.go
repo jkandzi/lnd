@@ -817,10 +817,6 @@ func TestFundingManagerNormalWorkflow(t *testing.T) {
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 
-	// The funding transaction is now confirmed, wait for the
-	// OpenStatusUpdate_ChanOpen update
-	waitForOpenUpdate(t, updateChan)
-
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
 	// internal state machine.
@@ -842,6 +838,10 @@ func TestFundingManagerNormalWorkflow(t *testing.T) {
 
 	// Check that the state machine is updated accordingly
 	assertAddedToRouterGraph(t, alice, bob, fundingOutPoint)
+
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
 
 	// Exchange the fundingLocked messages.
 	alice.fundingMgr.processFundingLocked(fundingLockedBob, bobAddr)
@@ -893,10 +893,6 @@ func TestFundingManagerRestartBehavior(t *testing.T) {
 	// Notify that transaction was mined
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
-
-	// The funding transaction is now confirmed, wait for the
-	// OpenStatusUpdate_ChanOpen update
-	waitForOpenUpdate(t, updateChan)
 
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
@@ -1018,10 +1014,6 @@ func TestFundingManagerOfflinePeer(t *testing.T) {
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 
-	// The funding transaction is now confirmed, wait for the
-	// OpenStatusUpdate_ChanOpen update
-	waitForOpenUpdate(t, updateChan)
-
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
 	// internal state machine.
@@ -1093,6 +1085,10 @@ func TestFundingManagerOfflinePeer(t *testing.T) {
 
 	// Check that the state machine is updated accordingly
 	assertAddedToRouterGraph(t, alice, bob, fundingOutPoint)
+
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
 
 	// Exchange the fundingLocked messages.
 	alice.fundingMgr.processFundingLocked(fundingLockedBob, bobAddr)
@@ -1177,10 +1173,6 @@ func TestFundingManagerReceiveFundingLockedTwice(t *testing.T) {
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 
-	// The funding transaction is now confirmed, wait for the
-	// OpenStatusUpdate_ChanOpen update
-	waitForOpenUpdate(t, updateChan)
-
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
 	// internal state machine.
@@ -1199,6 +1191,13 @@ func TestFundingManagerReceiveFundingLockedTwice(t *testing.T) {
 	// Make sure both fundingManagers send the expected channel
 	// announcements.
 	assertChannelAnnouncements(t, alice, bob)
+
+	// Check that the state machine is updated accordingly
+	assertAddedToRouterGraph(t, alice, bob, fundingOutPoint)
+
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
 
 	// Send the fundingLocked message twice to Alice, and once to Bob.
 	alice.fundingMgr.processFundingLocked(fundingLockedBob, bobAddr)
@@ -1273,10 +1272,6 @@ func TestFundingManagerRestartAfterChanAnn(t *testing.T) {
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 
-	// The funding transaction is now confirmed, wait for the
-	// OpenStatusUpdate_ChanOpen update
-	waitForOpenUpdate(t, updateChan)
-
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
 	// internal state machine.
@@ -1298,6 +1293,10 @@ func TestFundingManagerRestartAfterChanAnn(t *testing.T) {
 
 	// Check that the state machine is updated accordingly
 	assertAddedToRouterGraph(t, alice, bob, fundingOutPoint)
+
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
 
 	// At this point we restart Alice's fundingManager, before she receives
 	// the fundingLocked message. After restart, she will receive it, and
@@ -1344,10 +1343,6 @@ func TestFundingManagerRestartAfterReceivingFundingLocked(t *testing.T) {
 	// Notify that transaction was mined
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
-
-	// The funding transaction is now confirmed, wait for the
-	// OpenStatusUpdate_ChanOpen update
-	waitForOpenUpdate(t, updateChan)
 
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
@@ -1417,10 +1412,6 @@ func TestFundingManagerPrivateChannel(t *testing.T) {
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 
-	// The funding transaction is now confirmed, wait for the
-	// OpenStatusUpdate_ChanOpen update
-	waitForOpenUpdate(t, updateChan)
-
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
 	// internal state machine.
@@ -1439,6 +1430,10 @@ func TestFundingManagerPrivateChannel(t *testing.T) {
 	// Make sure both fundingManagers send the expected channel
 	// announcements.
 	assertChannelAnnouncements(t, alice, bob)
+
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
 
 	// Exchange the fundingLocked messages.
 	alice.fundingMgr.processFundingLocked(fundingLockedBob, bobAddr)
@@ -1495,10 +1490,6 @@ func TestFundingManagerPrivateRestart(t *testing.T) {
 	alice.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 	bob.mockNotifier.oneConfChannel <- &chainntnfs.TxConfirmation{}
 
-	// The funding transaction is now confirmed, wait for the
-	// OpenStatusUpdate_ChanOpen update
-	waitForOpenUpdate(t, updateChan)
-
 	// The funding transaction was mined, so assert that both funding
 	// managers now have the state of this channel 'markedOpen' in their
 	// internal state machine.
@@ -1514,6 +1505,19 @@ func TestFundingManagerPrivateRestart(t *testing.T) {
 	// Check that the state machine is updated accordingly
 	assertFundingLockedSent(t, alice, bob, fundingOutPoint)
 
+	// Make sure both fundingManagers send the expected channel
+	// announcements.
+	assertChannelAnnouncements(t, alice, bob)
+
+	// Note: We don't check for the addedToRouterGraph state because in
+	// the private channel mode, the state is quickly changed from
+	// addedToRouterGraph to deleted from the database since the public
+	// announcement phase is skipped.
+
+	// The funding transaction is now confirmed, wait for the
+	// OpenStatusUpdate_ChanOpen update
+	waitForOpenUpdate(t, updateChan)
+
 	// Exchange the fundingLocked messages.
 	alice.fundingMgr.processFundingLocked(fundingLockedBob, bobAddr)
 	bob.fundingMgr.processFundingLocked(fundingLockedAlice, aliceAddr)
@@ -1525,14 +1529,6 @@ func TestFundingManagerPrivateRestart(t *testing.T) {
 	// Restart Alice's fundingManager so we can prove that the public
 	// channel announcements are not sent upon restart and that the private
 	// setting persists upon restart.
-	recreateAliceFundingManager(t, alice)
-	time.Sleep(300 * time.Millisecond)
-
-	// Make sure both fundingManagers send the expected channel
-	// announcements.
-	assertChannelAnnouncements(t, alice, bob)
-
-	// Restart again.
 	recreateAliceFundingManager(t, alice)
 	time.Sleep(300 * time.Millisecond)
 
@@ -1559,9 +1555,5 @@ func TestFundingManagerPrivateRestart(t *testing.T) {
 
 	// The internal state-machine should now have deleted the channelStates
 	// from the database, as the channel is announced.
-	// Note: We don't check for the addedToRouterGraph state because in
-	// the private channel mode, the state is quickly changed from
-	// addedToRouterGraph to deleted from the database since the public
-	// announcement phase is skipped.
 	assertNoChannelState(t, alice, bob, fundingOutPoint)
 }

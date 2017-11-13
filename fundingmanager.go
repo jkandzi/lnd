@@ -1345,6 +1345,30 @@ func (f *fundingManager) handleFundingSigned(fmsg *fundingSignedMsg) {
 		}
 
 		// Success, funding transaction was confirmed.
+		// Go on adding the channel to the channel graph, and crafting
+		// channel announcements.
+
+		// We create the state-machine object which wraps the database state.
+		lnChannel, err := lnwallet.NewLightningChannel(nil, nil, f.cfg.FeeEstimator,
+			completeChan)
+		if err != nil {
+			fndgLog.Errorf("failed creating lnChannel: %v", err)
+			return
+		}
+		defer lnChannel.Stop()
+
+		err = f.sendFundingLocked(completeChan, lnChannel, shortChanID)
+		if err != nil {
+			fndgLog.Errorf("failed sending fundingLocked: %v", err)
+			return
+		}
+		err = f.addToRouterGraph(completeChan, lnChannel, shortChanID)
+		if err != nil {
+
+			fndgLog.Errorf("failed adding to router graph: %v", err)
+			return
+		}
+
 		// Give the caller a final update notifying them that
 		// the channel is now open.
 		// TODO(roasbeef): only notify after recv of funding locked?
@@ -1360,15 +1384,14 @@ func (f *fundingManager) handleFundingSigned(fmsg *fundingSignedMsg) {
 		}
 		f.deleteReservationCtx(peerKey, pendingChanID)
 
-		// Go on adding the channel to the channel graph, and crafting
-		// channel announcements.
-		err := f.handleFundingConfirmation(completeChan,
-			shortChanID)
+		err = f.annAfterSixConfs(completeChan, lnChannel, shortChanID)
 		if err != nil {
-			fndgLog.Errorf("failed to handle funding"+
-				"confirmation: %v", err)
+			fndgLog.Errorf("failed sending channel announcement: %v",
+				err)
 			return
 		}
+
+		return
 	}()
 }
 
@@ -1624,7 +1647,6 @@ func (f *fundingManager) sendFundingLocked(completeChan *channeldb.OpenChannel,
 	// send fundingLocked until we succeed, or the fundingManager is shut
 	// down.
 	for {
-
 		err = f.cfg.SendToPeer(completeChan.IdentityPub,
 			fundingLockedMsg)
 		if err == nil {
