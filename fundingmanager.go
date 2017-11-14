@@ -21,6 +21,7 @@ import (
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/lightningnetwork/lnd/routing"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/wire"
@@ -182,10 +183,10 @@ type fundingConfig struct {
 	// announcement from the backing Lighting Network node.
 	CurrentNodeAnnouncement func() (lnwire.NodeAnnouncement, error)
 
-	// SendLocalAnnouncement is used by the FundingManager to send
+	// SendAnnouncement is used by the FundingManager to send
 	// announcement messages to the Gossiper to possibly broadcast
 	// to the greater network.
-	SendLocalAnnouncement func(msg lnwire.Message) error
+	SendAnnouncement func(msg lnwire.Message) error
 
 	// SendToPeer allows the FundingManager to send messages to the peer
 	// node during the multiple steps involved in the creation of the
@@ -261,10 +262,6 @@ type fundingManager struct {
 	// funding workflows.
 	activeReservations map[serializedPubKey]pendingChannels
 
-	// pendingChanAnnPrefs is a map which stores a pending channel's id
-	// along with its announcement preference.
-	pendingChanAnnPrefs map[[32]byte]bool
-
 	// signedReservations is a utility map that maps the permanent channel
 	// ID of a funding reservation to its temporary channel ID. This is
 	// required as mid funding flow, we switch to referencing the channel
@@ -334,12 +331,6 @@ var (
 	// of being opened.
 	channelOpeningStateBucket = []byte("channelOpeningState")
 
-	// openChanAnnPrefBucket is the database bucket used to store each
-	// channel's announcement preference signalled by the LSB of
-	// channel_flags of the open_channel message in the funding workflow.
-	// It only stores open channels' announcement preferences.
-	openChanAnnPrefBucket = []byte("open_chan_ann")
-
 	// ErrChannelNotFound is returned when we are looking for a specific
 	// channel opening state in the FundingManager's internal database, but
 	// the channel in question is not considered being in an opening state.
@@ -359,7 +350,6 @@ func newFundingManager(cfg fundingConfig) (*fundingManager, error) {
 		fundingRequests:             make(chan *initFundingMsg, msgBufferSize),
 		localDiscoverySignals:       make(map[lnwire.ChannelID]chan struct{}),
 		handleFundingLockedBarriers: make(map[lnwire.ChannelID]struct{}),
-		pendingChanAnnPrefs:         make(map[[32]byte]bool),
 		queries:                     make(chan interface{}, 1),
 		quit:                        make(chan struct{}),
 	}, nil
@@ -505,41 +495,24 @@ func (f *fundingManager) Start() error {
 			go func(dbChan *channeldb.OpenChannel) {
 				defer f.wg.Done()
 
-				// Retrieve channel announcement preference
-				private, err := f.getOpenChanAnnPref(
-					&dbChan.FundingOutpoint)
-				if err != nil {
-					fndgLog.Errorf("unable to retrieve channel "+
-						"announcement preference: %v", err)
-					return
-				}
-
-				lnChannel, err := lnwallet.NewLightningChannel(
-					nil, nil, f.cfg.FeeEstimator, dbChan)
-				if err != nil {
-					fndgLog.Errorf("error creating "+
-						"lightning channel: %v", err)
-					return
-				}
-				defer lnChannel.Stop()
-
-				err = f.addToRouterGraph(dbChan, lnChannel,
-					shortChanID, private)
+				err = f.addToRouterGraph(dbChan, shortChanID)
 				if err != nil {
 					fndgLog.Errorf("failed adding to "+
 						"router graph: %v", err)
 					return
 				}
 
-				if !private {
-					err = f.annAfterSixConfs(dbChan,
-						lnChannel, shortChanID)
-					if err != nil {
-						fndgLog.Errorf("error sending channel "+
-							"announcement: %v", err)
-						return
-					}
+				// TODO(halseth): should create a state machine
+				// that can more easily be resumed from
+				// different states, to avoid this code
+				// duplication.
+				err = f.annAfterSixConfs(dbChan, shortChanID)
+				if err != nil {
+					fndgLog.Errorf("error sending channel "+
+						"announcements: %v", err)
+					return
 				}
+
 			}(channel)
 
 		case addedToRouterGraph:
@@ -548,42 +521,12 @@ func (f *fundingManager) Start() error {
 			f.wg.Add(1)
 			go func(dbChan *channeldb.OpenChannel) {
 				defer f.wg.Done()
-				// Retrieve channel announcement preference
-				private, err := f.getOpenChanAnnPref(
-					&dbChan.FundingOutpoint)
-				if err != nil {
-					fndgLog.Errorf("unable to retrieve channel "+
-						"announcement preference: %v", err)
-					return
-				}
 
-				lnChannel, err := lnwallet.NewLightningChannel(
-					nil, nil, f.cfg.FeeEstimator, dbChan)
+				err = f.annAfterSixConfs(channel, shortChanID)
 				if err != nil {
-					fndgLog.Errorf("error creating "+
-						"lightning channel: %v", err)
+					fndgLog.Errorf("error sending channel "+
+						"announcement: %v", err)
 					return
-				}
-				defer lnChannel.Stop()
-
-				if private {
-					// We delete the channel from our internal
-					// database.
-					err := f.deleteChannelOpeningState(
-						&channel.FundingOutpoint)
-					if err != nil {
-						fndgLog.Errorf("error deleting "+
-							"channel state: %v", err)
-						return
-					}
-				} else {
-					err = f.annAfterSixConfs(channel,
-						lnChannel, shortChanID)
-					if err != nil {
-						fndgLog.Errorf("error sending channel "+
-							"announcement: %v", err)
-						return
-					}
 				}
 			}(channel)
 
@@ -729,7 +672,6 @@ func (f *fundingManager) failFundingFlow(peer *btcec.PublicKey,
 		return
 	}
 
-	delete(f.pendingChanAnnPrefs, tempChanID)
 	f.cancelReservationCtx(peer, tempChanID)
 	return
 }
@@ -826,6 +768,7 @@ func (f *fundingManager) handleFundingOpen(fmsg *fundingOpenMsg) {
 	// number and send ErrorGeneric to remote peer if condition is
 	// violated.
 	peerIDKey := newSerializedKey(fmsg.peerAddress.IdentityKey)
+
 	msg := fmsg.msg
 	amt := msg.FundingAmount
 
@@ -899,6 +842,10 @@ func (f *fundingManager) handleFundingOpen(fmsg *fundingOpenMsg) {
 	numConfsReq := f.cfg.NumRequiredConfs(msg.FundingAmount, msg.PushAmount)
 	reservation.SetNumConfsRequired(numConfsReq)
 
+	// The initiator of the channel has specified channel flags for this
+	// channel, save them for later.
+	reservation.SetChannelFlags(msg.ChannelFlags)
+
 	// We'll also validate and apply all the constraints the initiating
 	// party is attempting to dictate for our commitment transaction.
 	err = reservation.CommitConstraints(
@@ -932,16 +879,6 @@ func (f *fundingManager) handleFundingOpen(fmsg *fundingOpenMsg) {
 		peerAddress: fmsg.peerAddress,
 	}
 	f.resMtx.Unlock()
-
-	// Save the announcement preference of this pending channel
-	if msg.ChannelFlags&1 == 0 {
-		// This channel WILL be announced to the greater network later.
-		f.pendingChanAnnPrefs[msg.PendingChannelID] = false
-	} else {
-		// This channel WILL NOT be announced to the greater network
-		// later.
-		f.pendingChanAnnPrefs[msg.PendingChannelID] = true
-	}
 
 	// Using the RequiredRemoteDelay closure, we'll compute the remote CSV
 	// delay we require given the total amount of funds within the channel.
@@ -1177,12 +1114,6 @@ func (f *fundingManager) handleFundingCreated(fmsg *fundingCreatedMsg) {
 			peerKey, pendingChanID[:])
 		return
 	}
-	private, ok := f.pendingChanAnnPrefs[pendingChanID]
-	if !ok {
-		fndgLog.Warnf("can't find channel announcement preference for"+
-			"chanID:%x", pendingChanID[:])
-		return
-	}
 
 	// The channel initiator has responded with the funding outpoint of the
 	// final funding transaction, as well as a signature for our version of
@@ -1209,32 +1140,10 @@ func (f *fundingManager) handleFundingCreated(fmsg *fundingCreatedMsg) {
 		return
 	}
 
-	// A new channel has almost finished the funding process. In order to
-	// properly synchronize with the writeHandler goroutine, we add a new
-	// channel to the barriers map which will be closed once the channel is
-	// fully open.
-	f.barrierMtx.Lock()
-	channelID := lnwire.NewChanIDFromOutPoint(&fundingOut)
-	fndgLog.Debugf("Creating chan barrier for ChanID(%v)", channelID)
-	f.newChanBarriers[channelID] = make(chan struct{})
-	f.barrierMtx.Unlock()
-
-	// Store channel announcement preference in boltdb
-	if err = f.saveOpenChanAnnPref(&fundingOut, private); err != nil {
-		fndgLog.Errorf("unable to save channel announcement preference "+
-			"to db for chanID:%x", channelID)
-	}
-
 	// If something goes wrong before the funding transaction is confirmed,
 	// we use this convenience method to delete the pending OpenChannel
 	// from the database.
 	deleteFromDatabase := func() {
-		err := f.deleteOpenChanAnnPref(&completeChan.FundingOutpoint)
-		if err != nil {
-			fndgLog.Errorf("Failed to delete channel announcement "+
-				"preference: %v", err)
-		}
-
 		closeInfo := &channeldb.ChannelCloseSummary{
 			ChanPoint: completeChan.FundingOutpoint,
 			ChainHash: completeChan.ChainHash,
@@ -1317,31 +1226,36 @@ func (f *fundingManager) handleFundingCreated(fmsg *fundingCreatedMsg) {
 		go f.waitForFundingWithTimeout(completeChan, confChan,
 			timeoutChan)
 
+		var shortChanID *lnwire.ShortChannelID
+		var ok bool
 		select {
 		case <-timeoutChan:
 			// We did not see the funding confirmation before
 			// timeout, so we forget the channel.
 			deleteFromDatabase()
+			return
 		case <-f.quit:
 			// The fundingManager is shutting down, will resume
 			// wait for funding transaction on startup.
-		case shortChanID, ok := <-confChan:
+			return
+		case shortChanID, ok = <-confChan:
 			if !ok {
 				fndgLog.Errorf("waiting for funding confirmation" +
 					" failed")
 				return
 			}
+			// Fallthrough.
+		}
 
-			f.deleteReservationCtx(peerKey, fmsg.msg.PendingChannelID)
+		// Success, funding transaction was confirmed.
+		f.deleteReservationCtx(peerKey, fmsg.msg.PendingChannelID)
 
-			// Success, funding transaction was confirmed.
-			err := f.handleFundingConfirmation(completeChan,
-				shortChanID)
-			if err != nil {
-				fndgLog.Errorf("failed to handle funding"+
-					"confirmation: %v", err)
-				return
-			}
+		err := f.handleFundingConfirmation(completeChan,
+			shortChanID)
+		if err != nil {
+			fndgLog.Errorf("failed to handle funding"+
+				"confirmation: %v", err)
+			return
 		}
 	}()
 }
@@ -1390,12 +1304,6 @@ func (f *fundingManager) handleFundingSigned(fmsg *fundingSignedMsg) {
 			pendingChanID, []byte(err.Error()))
 		return
 	}
-	private, ok := f.pendingChanAnnPrefs[pendingChanID]
-	if !ok {
-		fndgLog.Warnf("can't find channel announcement preference for"+
-			"chanID:%x", pendingChanID[:])
-		return
-	}
 
 	// Create an entry in the local discovery map so we can ensure that we
 	// process the channel confirmation fully before we receive a funding
@@ -1405,12 +1313,6 @@ func (f *fundingManager) handleFundingSigned(fmsg *fundingSignedMsg) {
 	f.localDiscoveryMtx.Lock()
 	f.localDiscoverySignals[permChanID] = make(chan struct{})
 	f.localDiscoveryMtx.Unlock()
-
-	// Store channel announcement preference in boltdb
-	if err = f.saveOpenChanAnnPref(fundingPoint, private); err != nil {
-		fndgLog.Errorf("unable to save channel announcement preference "+
-			"to db for chanID:%x", permChanID)
-	}
 
 	// The remote peer has responded with a signature for our commitment
 	// transaction. We'll verify the signature for validity, then commit
@@ -1458,29 +1360,55 @@ func (f *fundingManager) handleFundingSigned(fmsg *fundingSignedMsg) {
 				confChan)
 		}()
 
+		var shortChanID *lnwire.ShortChannelID
+		var ok bool
 		select {
 		case <-f.quit:
 			return
-		case shortChanID, ok := <-confChan:
+		case shortChanID, ok = <-confChan:
 			if !ok {
 				fndgLog.Errorf("waiting for funding confirmation" +
 					" failed")
 				return
 			}
-
-			f.deleteReservationCtx(peerKey, pendingChanID)
-
-			// Success, funding transaction was confirmed
-			err := f.handleFundingConfirmation(completeChan,
-				shortChanID)
-			if err != nil {
-				fndgLog.Errorf("failed to handle funding"+
-					"confirmation: %v", err)
-				return
-			}
 		}
 
-		// Finally give the caller a final update notifying them that
+		// Success, funding transaction was confirmed.
+		fndgLog.Debugf("Channel with ShortChanID %v now confirmed",
+			shortChanID.ToUint64())
+
+		// Go on adding the channel to the channel graph, and crafting
+		// channel announcements.
+
+		// We create the state-machine object which wraps the database state.
+		lnChannel, err := lnwallet.NewLightningChannel(nil, nil, f.cfg.FeeEstimator,
+			completeChan)
+		if err != nil {
+			fndgLog.Errorf("failed creating lnChannel: %v", err)
+			return
+		}
+		defer func() {
+			lnChannel.Stop()
+			lnChannel.CancelObserver()
+		}()
+
+		err = f.sendFundingLocked(completeChan, lnChannel, shortChanID)
+		if err != nil {
+			fndgLog.Errorf("failed sending fundingLocked: %v", err)
+			return
+		}
+		fndgLog.Debugf("FundingLocked for channel with ShortChanID "+
+			"%v sent", shortChanID.ToUint64())
+
+		err = f.addToRouterGraph(completeChan, shortChanID)
+		if err != nil {
+			fndgLog.Errorf("failed adding to router graph: %v", err)
+			return
+		}
+		fndgLog.Debugf("Channel with ShortChanID %v added to "+
+			"router graph", shortChanID.ToUint64())
+
+		// Give the caller a final update notifying them that
 		// the channel is now open.
 		// TODO(roasbeef): only notify after recv of funding locked?
 		resCtx.updates <- &lnrpc.OpenStatusUpdate{
@@ -1493,6 +1421,19 @@ func (f *fundingManager) handleFundingSigned(fmsg *fundingSignedMsg) {
 				},
 			},
 		}
+
+		f.deleteReservationCtx(peerKey, pendingChanID)
+
+		err = f.annAfterSixConfs(completeChan, shortChanID)
+		if err != nil {
+			fndgLog.Errorf("failed sending channel announcement: %v",
+				err)
+			return
+		}
+		fndgLog.Debugf("Channel with ShortChanID %v announced",
+			shortChanID.ToUint64())
+
+		return
 	}()
 }
 
@@ -1671,8 +1612,9 @@ func (f *fundingManager) waitForFundingConfirmation(completeChan *channeldb.Open
 		return
 	}
 
-	// This closes the discoverySignal channel, indicating to a separate
-	// goroutine that it is acceptable to process funding locked messages
+	// Close the discoverySignal channel, indicating to a separate
+	// goroutine that the channel now is marked as open in the database
+	// and that it is acceptable to process funding locked messages
 	// from the peer.
 	f.localDiscoveryMtx.Lock()
 	if discoverySignal, ok := f.localDiscoverySignals[chanID]; ok {
@@ -1687,13 +1629,6 @@ func (f *fundingManager) waitForFundingConfirmation(completeChan *channeldb.Open
 // confirmed.
 func (f *fundingManager) handleFundingConfirmation(completeChan *channeldb.OpenChannel,
 	shortChanID *lnwire.ShortChannelID) error {
-
-	// Retrieve channel announcement preference
-	private, err := f.getOpenChanAnnPref(&completeChan.FundingOutpoint)
-	if err != nil {
-		return fmt.Errorf("unable to retrieve channel announcement "+
-			"preference: %v", err)
-	}
 
 	// We create the state-machine object which wraps the database state.
 	lnChannel, err := lnwallet.NewLightningChannel(nil, nil, f.cfg.FeeEstimator,
@@ -1714,23 +1649,14 @@ func (f *fundingManager) handleFundingConfirmation(completeChan *channeldb.OpenC
 	if err != nil {
 		return fmt.Errorf("failed sending fundingLocked: %v", err)
 	}
-	err = f.addToRouterGraph(completeChan, lnChannel, shortChanID, private)
+	err = f.addToRouterGraph(completeChan, shortChanID)
 	if err != nil {
 		return fmt.Errorf("failed adding to router graph: %v", err)
 	}
-
-	if private {
-		// We delete the channel from our internal database.
-		err := f.deleteChannelOpeningState(&completeChan.FundingOutpoint)
-		if err != nil {
-			return fmt.Errorf("error deleting channel state: %v", err)
-		}
-	} else {
-		err = f.annAfterSixConfs(completeChan, lnChannel, shortChanID)
-		if err != nil {
-			return fmt.Errorf("failed sending channel announcement: %v",
-				err)
-		}
+	err = f.annAfterSixConfs(completeChan, shortChanID)
+	if err != nil {
+		return fmt.Errorf("failed sending channel announcement: %v",
+			err)
 	}
 
 	return nil
@@ -1787,7 +1713,7 @@ func (f *fundingManager) sendFundingLocked(completeChan *channeldb.OpenChannel,
 		case <-connected:
 			// Retry sending.
 		case <-f.quit:
-			return nil
+			return fmt.Errorf("fundingManager shutting down")
 		}
 	}
 
@@ -1805,19 +1731,26 @@ func (f *fundingManager) sendFundingLocked(completeChan *channeldb.OpenChannel,
 	return nil
 }
 
-// addToRouterGraph sends a private ChannelAnnouncement and a private
-// ChannelUpdate to the gossiper so that it is added to the Router's internal
-// graph before the announcement_signatures is sent in
-// annAfterSixConfs. These private announcement messages are NOT
-// broadcasted to the greater network.
+// addToRouterGraph sends a ChannelAnnouncement and a ChannelUpdate to the
+// gossiper so that the channel is added to the Router's internal graph.
+// These announcement messages are NOT broadcasted to the greater network,
+// only to the channel counter party. The proofs required to announce the
+// channel to the greater network will be created and sent in annAfterSixConfs.
 func (f *fundingManager) addToRouterGraph(completeChan *channeldb.OpenChannel,
-	shortChanID *lnwire.ShortChannelID, private bool) error {
+	shortChanID *lnwire.ShortChannelID) error {
 
 	chanID := lnwire.NewChanIDFromOutPoint(&completeChan.FundingOutpoint)
 
+	// We'll obtain their min HTLC as we'll use this value within our
+	// ChannelUpdate. We use this value isn't of ours, as the remote party
+	// will be the one that's carrying the HTLC towards us.
+	remoteMinHTLC := completeChan.RemoteChanCfg.MinHTLC
+
 	ann, err := f.newChanAnnouncement(f.cfg.IDKey, completeChan.IdentityPub,
 		completeChan.LocalChanCfg.MultiSigKey,
-		completeChan.RemoteChanCfg.MultiSigKey, *shortChanID, chanID)
+		completeChan.RemoteChanCfg.MultiSigKey, *shortChanID, chanID,
+		remoteMinHTLC,
+	)
 	if err != nil {
 		return fmt.Errorf("error generating channel "+
 			"announcement: %v", err)
@@ -1825,21 +1758,30 @@ func (f *fundingManager) addToRouterGraph(completeChan *channeldb.OpenChannel,
 
 	// Send ChannelAnnouncement and ChannelUpdate to the gossiper to add
 	// to the Router's topology.
-	if err = f.cfg.SendLocalAnnouncement(ann.chanAnn); err != nil {
-		return fmt.Errorf("error sending private channel "+
-			"announcement: %v", err)
+	if err = f.cfg.SendAnnouncement(ann.chanAnn); err != nil {
+		if routing.IsError(err, routing.ErrOutdated, routing.ErrIgnored) {
+			fndgLog.Debugf("Router rejected ChannelAnnouncement: %v",
+				err)
+		} else {
+			return fmt.Errorf("error sending channel "+
+				"announcement: %v", err)
+		}
 	}
-	if err = f.cfg.SendLocalAnnouncement(ann.chanUpdateAnn); err != nil {
-		return fmt.Errorf("error sending private channel "+
-			"update: %v", err)
+	if err = f.cfg.SendAnnouncement(ann.chanUpdateAnn); err != nil {
+		if routing.IsError(err, routing.ErrOutdated, routing.ErrIgnored) {
+			fndgLog.Debugf("Router rejected ChannelUpdate: %v", err)
+		} else {
+			return fmt.Errorf("error sending channel "+
+				"update: %v", err)
+		}
 	}
 
 	// As the channel is now added to the ChannelRouter's topology, the
 	// channel is moved to the next state of the state machine. It will be
 	// moved to the last state (actually deleted from the database) after
 	// the channel is finally announced.
-	err = f.saveChannelOpeningState(&completeChan.FundingOutpoint, addedToRouterGraph,
-		shortChanID)
+	err = f.saveChannelOpeningState(&completeChan.FundingOutpoint,
+		addedToRouterGraph, shortChanID)
 	if err != nil {
 		return fmt.Errorf("error setting channel state to"+
 			" addedToRouterGraph: %v", err)
@@ -1851,61 +1793,83 @@ func (f *fundingManager) addToRouterGraph(completeChan *channeldb.OpenChannel,
 // annAfterSixConfs broadcasts the necessary channel announcement messages to
 // the network after 6 confs. Should be called after the fundingLocked message
 // is sent and the channel is added to the router graph (channelState is
-// 'addedToRouterGraph') and the channel is ready to be used.
+// 'addedToRouterGraph') and the channel is ready to be used. This is the last
+// step in the channel opening process, and the opening state will be deleted
+// from the database if successful.
 func (f *fundingManager) annAfterSixConfs(completeChan *channeldb.OpenChannel,
 	shortChanID *lnwire.ShortChannelID) error {
 
-	// Register with the ChainNotifier for a notification once the
-	// funding transaction reaches 6 confirmations.
-	txid := completeChan.FundingOutpoint.Hash
-	confNtfn, err := f.cfg.Notifier.RegisterConfirmationsNtfn(&txid, 6,
-		completeChan.FundingBroadcastHeight)
-	if err != nil {
-		return fmt.Errorf("Unable to register for confirmation of "+
-			"ChannelPoint(%v): %v", completeChan.FundingOutpoint, err)
-	}
-
-	// Wait until 6 confirmations has been reached or the wallet signals
-	// a shutdown.
-	select {
-	case _, ok := <-confNtfn.Confirmed:
-		if !ok {
-			return fmt.Errorf("ChainNotifier shutting down, cannot "+
-				"complete funding flow for ChannelPoint(%v)",
-				completeChan.FundingOutpoint)
+	// If this channel is meant to be announced to the greater network,
+	// wait until the funding tx has reached 6 confirmations before
+	// announcing it.
+	announceChan := completeChan.ChannelFlags&lnwire.FFAnnounceChannel != 0
+	if !announceChan {
+		fndgLog.Debugf("Will not announce private channel %v.",
+			shortChanID.ToUint64())
+	} else {
+		// Register with the ChainNotifier for a notification once the
+		// funding transaction reaches at least 6 confirmations.
+		numConfs := uint32(completeChan.NumConfsRequired)
+		if numConfs < 6 {
+			numConfs = 6
 		}
-	case <-f.quit:
-		return fmt.Errorf("fundingManager shutting down, stopping funding "+
-			"flow for ChannelPoint(%v)", completeChan.FundingOutpoint)
+		txid := completeChan.FundingOutpoint.Hash
+		fndgLog.Debugf("Will announce channel %v after ChannelPoint"+
+			"(%v) has gotten %d confirmations",
+			shortChanID.ToUint64(), completeChan.FundingOutpoint,
+			numConfs)
+
+		confNtfn, err := f.cfg.Notifier.RegisterConfirmationsNtfn(&txid,
+			numConfs, completeChan.FundingBroadcastHeight)
+		if err != nil {
+			return fmt.Errorf("Unable to register for confirmation of "+
+				"ChannelPoint(%v): %v", completeChan.FundingOutpoint, err)
+		}
+
+		// Wait until 6 confirmations has been reached or the wallet signals
+		// a shutdown.
+		select {
+		case _, ok := <-confNtfn.Confirmed:
+			if !ok {
+				return fmt.Errorf("ChainNotifier shutting down, cannot "+
+					"complete funding flow for ChannelPoint(%v)",
+					completeChan.FundingOutpoint)
+			}
+			// Fallthrough.
+
+		case <-f.quit:
+			return fmt.Errorf("fundingManager shutting down, stopping funding "+
+				"flow for ChannelPoint(%v)", completeChan.FundingOutpoint)
+		}
+
+		fundingPoint := completeChan.FundingOutpoint
+		chanID := lnwire.NewChanIDFromOutPoint(&fundingPoint)
+
+		fndgLog.Infof("Announcing ChannelPoint(%v), short_chan_id=%v",
+			&fundingPoint, spew.Sdump(shortChanID))
+
+		// We'll obtain their min HTLC as we'll use this value within our
+		// ChannelUpdate. We use this value isn't of ours, as the remote party
+		// will be the one that's carrying the HTLC towards us.
+		remoteMinHTLC := completeChan.RemoteChanCfg.MinHTLC
+
+		// Create and broadcast the proofs required to make this channel
+		// public and usable for other nodes for routing.
+		err = f.announceChannel(f.cfg.IDKey, completeChan.IdentityPub,
+			completeChan.LocalChanCfg.MultiSigKey,
+			completeChan.RemoteChanCfg.MultiSigKey, *shortChanID, chanID,
+			remoteMinHTLC,
+		)
+		if err != nil {
+			return fmt.Errorf("channel announcement failed: %v", err)
+		}
 	}
 
-	fundingPoint := completeChan.FundingOutpoint
-	chanID := lnwire.NewChanIDFromOutPoint(&fundingPoint)
-
-	fndgLog.Infof("Announcing ChannelPoint(%v), short_chan_id=%v",
-		&fundingPoint, spew.Sdump(shortChanID))
-
-	// We'll obtain their min HTLC as we'll use this value within our
-	// ChannelUpdate. We use this value isn't of ours, as the remote party
-	// will be the one that's carrying the HTLC towards us.
-	remoteMinHTLC := completeChan.RemoteChanCfg.MinHTLC
-
-	// Register the new link with the L3 routing manager so this new
-	// channel can be utilized during path finding.
-	err := f.announceChannel(f.cfg.IDKey, completeChan.IdentityPub,
-		completeChan.LocalChanCfg.MultiSigKey,
-		completeChan.RemoteChanCfg.MultiSigKey, *shortChanID, chanID,
-		remoteMinHTLC,
-	)
-	if err != nil {
-		return fmt.Errorf("channel announcement failed: %v", err)
-	}
-
-	// After the channel is successfully announced from the fundingManager,
-	// we delete the channel from our internal database.  We can do this
-	// because we assume the AuthenticatedGossiper queues the announcement
-	// messages, and persists them in case of a daemon shutdown.
-	err = f.deleteChannelOpeningState(&fundingPoint)
+	// We delete the channel opening state from our internal database
+	// as the opening process has succeeded. We can do this because we
+	// assume the AuthenticatedGossiper queues the announcement messages,
+	// and persists them in case of a daemon shutdown.
+	err := f.deleteChannelOpeningState(&completeChan.FundingOutpoint)
 	if err != nil {
 		return fmt.Errorf("error deleting channel state: %v", err)
 	}
@@ -2228,8 +2192,13 @@ func (f *fundingManager) announceChannel(localIDKey, remoteIDKey, localFundingKe
 	// because addToRouterGraph previously send the ChannelAnnouncement and
 	// the ChannelUpdate announcement messages. The channel proof and node
 	// announcements are broadcast to the greater network.
-	if err = f.cfg.SendLocalAnnouncement(ann.chanProof); err != nil {
-		return err
+	if err = f.cfg.SendAnnouncement(ann.chanProof); err != nil {
+		if routing.IsError(err, routing.ErrOutdated, routing.ErrIgnored) {
+			fndgLog.Debugf("Router rejected AnnounceSignatures: %v",
+				err)
+		} else {
+			return err
+		}
 	}
 
 	// Now that the channel is announced to the network, we will also
@@ -2242,7 +2211,15 @@ func (f *fundingManager) announceChannel(localIDKey, remoteIDKey, localFundingKe
 		return err
 	}
 
-	return f.cfg.SendLocalAnnouncement(&nodeAnn)
+	if err := f.cfg.SendAnnouncement(&nodeAnn); err != nil {
+		if routing.IsError(err, routing.ErrOutdated, routing.ErrIgnored) {
+			fndgLog.Debugf("Router rejected NodeAnnouncement: %v",
+				err)
+		} else {
+			return err
+		}
+	}
+	return nil
 }
 
 // initFundingWorkflow sends a message to the funding manager instructing it
@@ -2341,17 +2318,14 @@ func (f *fundingManager) handleInitFundingMsg(msg *initFundingMsg) {
 	fndgLog.Infof("Starting funding workflow with %v for pendingID(%x)",
 		msg.peerAddress.Address, chanID)
 
-	// Save the announcement preference of this pending channel
-	var channelFlags byte
-	if msg.openChanReq.private {
-		// This channel will be private
-		channelFlags = 1
-		f.pendingChanAnnPrefs[chanID] = true
-	} else {
-		// This channel will be publicly announced to the greater network.
-		channelFlags = 0
-		f.pendingChanAnnPrefs[chanID] = false
+	// We set the channel flags to indicate whether we want this channel
+	// to be announced to the network.
+	var channelFlags lnwire.FundingFlag
+	if msg.openChanReq.announceChan {
+		// This channel will be announced.
+		channelFlags = lnwire.FFAnnounceChannel
 	}
+	reservation.SetChannelFlags(channelFlags)
 
 	fundingOpen := lnwire.OpenChannel{
 		ChainHash:            *f.cfg.Wallet.Cfg.NetParams.GenesisHash,
@@ -2371,7 +2345,7 @@ func (f *fundingManager) handleInitFundingMsg(msg *initFundingMsg) {
 		HtlcPoint:            ourContribution.HtlcBasePoint,
 		DelayedPaymentPoint:  ourContribution.DelayBasePoint,
 		FirstCommitmentPoint: ourContribution.FirstCommitmentPoint,
-		ChannelFlags:         lnwire.FFAnnounceChannel,
+		ChannelFlags:         channelFlags,
 	}
 	if err := f.cfg.SendToPeer(peerKey, &fundingOpen); err != nil {
 		fndgLog.Errorf("Unable to send funding request message: %v", err)
@@ -2453,7 +2427,6 @@ func (f *fundingManager) handleErrorMsg(fmsg *fundingErrorMsg) {
 		)
 	}
 
-	delete(f.pendingChanAnnPrefs, chanID)
 	if _, err := f.cancelReservationCtx(peerKey, chanID); err != nil {
 		fndgLog.Warnf("unable to delete reservation: %v", err)
 		return
@@ -2520,86 +2493,6 @@ func copyPubKey(pub *btcec.PublicKey) *btcec.PublicKey {
 		X:     pub.X,
 		Y:     pub.Y,
 	}
-}
-
-// saveOpenChanAnnPref saves an open channel's announcement preference.
-func (f *fundingManager) saveOpenChanAnnPref(chanPoint *wire.OutPoint,
-	pref bool) error {
-	return f.cfg.Wallet.Cfg.Database.Update(func(tx *bolt.Tx) error {
-
-		bucket, err := tx.CreateBucketIfNotExists(openChanAnnPrefBucket)
-		if err != nil {
-			return err
-		}
-
-		var outpointBytes bytes.Buffer
-		if err = writeOutpoint(&outpointBytes, chanPoint); err != nil {
-			return err
-		}
-
-		scratch := make([]byte, 0)
-		var b byte
-		if pref {
-			b = 1
-		} else {
-			b = 0
-		}
-		scratch = append(scratch[:], b)
-
-		return bucket.Put(outpointBytes.Bytes(), scratch[:])
-	})
-}
-
-// getOpenChanAnnPref retrives an open channel's announcement preference.
-func (f *fundingManager) getOpenChanAnnPref(chanPoint *wire.OutPoint) (bool, error) {
-
-	var pref bool
-	err := f.cfg.Wallet.Cfg.Database.View(func(tx *bolt.Tx) error {
-
-		bucket := tx.Bucket(openChanAnnPrefBucket)
-		if bucket == nil {
-			return fmt.Errorf("Channel announcement preference " +
-				"not found")
-		}
-
-		var outpointBytes bytes.Buffer
-		if err := writeOutpoint(&outpointBytes, chanPoint); err != nil {
-			return err
-		}
-
-		value := bucket.Get(outpointBytes.Bytes())
-		if value == nil {
-			return fmt.Errorf("Channel announcement preference " +
-				"not found")
-		}
-
-		if value[0] == 1 {
-			pref = true
-		}
-		return nil
-	})
-	if err != nil {
-		return false, err
-	}
-
-	return pref, nil
-}
-
-// deleteOpenChanAnnPref deletes an open channel's announcement preference.
-func (f *fundingManager) deleteOpenChanAnnPref(chanPoint *wire.OutPoint) error {
-	return f.cfg.Wallet.Cfg.Database.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(openChanAnnPrefBucket)
-		if bucket == nil {
-			return fmt.Errorf("Bucket not found")
-		}
-
-		var outpointBytes bytes.Buffer
-		if err := writeOutpoint(&outpointBytes, chanPoint); err != nil {
-			return err
-		}
-
-		return bucket.Delete(outpointBytes.Bytes())
-	})
 }
 
 // saveChannelOpeningState saves the channelOpeningState for the provided
