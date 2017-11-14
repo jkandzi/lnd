@@ -1127,6 +1127,7 @@ func (n *networkHarness) OpenChannel(ctx context.Context,
 		NodePubkey:         destNode.PubKey[:],
 		LocalFundingAmount: int64(amt),
 		PushSat:            int64(pushAmt),
+		Announce:           true,
 	}
 
 	respStream, err := srcNode.OpenChannel(ctx, openReq)
@@ -1186,6 +1187,7 @@ func (n *networkHarness) OpenPendingChannel(ctx context.Context,
 		NodePubkey:         destNode.PubKey[:],
 		LocalFundingAmount: int64(amt),
 		PushSat:            int64(pushAmt),
+		Announce:           true,
 	}
 
 	respStream, err := srcNode.OpenChannel(ctx, openReq)
