@@ -422,6 +422,12 @@ var openChannelCommand = cli.Command{
 				"sat/byte that should be used when crafting " +
 				"the transaction",
 		},
+		cli.BoolFlag{
+			Name: "announce",
+			Usage: "announce channel to the greater network, such " +
+				"that it can be used by other nodes to route " +
+				"payments through",
+		},
 	},
 	Action: actionDecorator(openChannel),
 }
@@ -491,6 +497,13 @@ func openChannel(ctx *cli.Context) error {
 		if err != nil {
 			return fmt.Errorf("unable to decode push amt: %v", err)
 		}
+	}
+
+	if ctx.IsSet("announce") {
+		req.Announce = ctx.Bool("announce")
+	} else {
+		// TODO(halseth): make default be false.
+		req.Announce = true
 	}
 
 	stream, err := client.OpenChannel(ctxb, req)
