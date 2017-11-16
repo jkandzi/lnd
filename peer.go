@@ -48,8 +48,8 @@ const (
 // a buffered channel which will be sent upon once the write is complete. This
 // buffered channel acts as a semaphore to be used for synchronization purposes.
 type outgoinMsg struct {
-	msg      lnwire.Message
-	sentChan chan struct{} // MUST be buffered.
+	msg     lnwire.Message
+	errChan chan error // MUST be buffered.
 }
 
 // newChannelMsg packages a lnwallet.LightningChannel with a channel that
@@ -1027,8 +1027,8 @@ out:
 			// callers to optionally synchronize sends with the
 			// writeHandler.
 			err := p.writeMessage(outMsg.msg)
-			if outMsg.sentChan != nil {
-				close(outMsg.sentChan)
+			if outMsg.errChan != nil {
+				outMsg.errChan <- err
 			}
 
 			if err != nil {
@@ -1123,10 +1123,14 @@ func (p *peer) PingTime() int64 {
 
 // queueMsg queues a new lnwire.Message to be eventually sent out on the
 // wire.
-func (p *peer) queueMsg(msg lnwire.Message, doneChan chan struct{}) {
+func (p *peer) queueMsg(msg lnwire.Message, errChan chan error) {
 	select {
-	case p.outgoingQueue <- outgoinMsg{msg, doneChan}:
+	case p.outgoingQueue <- outgoinMsg{msg, errChan}:
 	case <-p.quit:
+		peerLog.Debugf("Peer shutting down, could not enqueue msg.")
+		if errChan != nil {
+			errChan <- fmt.Errorf("peer shutting down")
+		}
 		return
 	}
 }
