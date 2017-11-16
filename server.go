@@ -951,9 +951,7 @@ func (s *server) sendToPeer(target *btcec.PublicKey,
 		return err
 	}
 
-	s.sendPeerMessages(targetPeer, msgs, nil)
-
-	return nil
+	return s.sendPeerMessages(targetPeer, msgs, nil)
 }
 
 // sendPeerMessages enqueues a list of messages into the outgoingQueue of the
@@ -969,7 +967,7 @@ func (s *server) sendToPeer(target *btcec.PublicKey,
 func (s *server) sendPeerMessages(
 	targetPeer *peer,
 	msgs []lnwire.Message,
-	wg *sync.WaitGroup) {
+	wg *sync.WaitGroup) error {
 
 	// If a WaitGroup is provided, we assume that this method was spawned
 	// as a go routine, and that it is being tracked by both the server's
@@ -983,8 +981,20 @@ func (s *server) sendPeerMessages(
 	}
 
 	for _, msg := range msgs {
-		targetPeer.queueMsg(msg, nil)
+		errChan := make(chan error, 1)
+		targetPeer.queueMsg(msg, errChan)
+		select {
+		case err := <-errChan:
+			if err != nil {
+				srvrLog.Errorf("Failed queuing message: %v", err)
+				return err
+			}
+		case <-s.quit:
+			return fmt.Errorf("server shutting down")
+		}
 	}
+
+	return nil
 }
 
 // FindPeer will return the peer that corresponds to the passed in public key.
