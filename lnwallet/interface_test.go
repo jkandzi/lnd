@@ -272,7 +272,7 @@ func testDualFundingReservationWorkflow(miner *rpctest.Harness,
 	}
 	aliceChanReservation.SetNumConfsRequired(numReqConfs)
 	aliceChanReservation.CommitConstraints(csvDelay, lnwallet.MaxHTLCNumber/2,
-		lnwire.NewMSatFromSatoshis(fundingAmount), 10)
+		lnwire.NewMSatFromSatoshis(fundingAmount), 1, 10)
 
 	// The channel reservation should now be populated with a multi-sig key
 	// from our HD chain, a change output with 3 BTC, and 2 outputs
@@ -295,7 +295,7 @@ func testDualFundingReservationWorkflow(miner *rpctest.Harness,
 		t.Fatalf("bob unable to init channel reservation: %v", err)
 	}
 	bobChanReservation.CommitConstraints(csvDelay, lnwallet.MaxHTLCNumber/2,
-		lnwire.NewMSatFromSatoshis(fundingAmount), 10)
+		lnwire.NewMSatFromSatoshis(fundingAmount), 1, 10)
 	bobChanReservation.SetNumConfsRequired(numReqConfs)
 
 	assertContributionInitPopulated(t, bobChanReservation.OurContribution())
@@ -604,7 +604,7 @@ func testSingleFunderReservationWorkflow(miner *rpctest.Harness,
 	}
 	aliceChanReservation.SetNumConfsRequired(numReqConfs)
 	aliceChanReservation.CommitConstraints(csvDelay, lnwallet.MaxHTLCNumber/2,
-		lnwire.NewMSatFromSatoshis(fundingAmt), 10)
+		lnwire.NewMSatFromSatoshis(fundingAmt), 1, 10)
 
 	// Verify all contribution fields have been set properly.
 	aliceContribution := aliceChanReservation.OurContribution()
@@ -616,7 +616,6 @@ func testSingleFunderReservationWorkflow(miner *rpctest.Harness,
 		t.Fatalf("coin selection failed, should have one change outputs, "+
 			"instead have: %v", len(aliceContribution.ChangeOutputs))
 	}
-	aliceContribution.CsvDelay = csvDelay
 	assertContributionInitPopulated(t, aliceContribution)
 
 	// Next, Bob receives the initial request, generates a corresponding
@@ -627,12 +626,11 @@ func testSingleFunderReservationWorkflow(miner *rpctest.Harness,
 		t.Fatalf("unable to create bob reservation: %v", err)
 	}
 	bobChanReservation.CommitConstraints(csvDelay, lnwallet.MaxHTLCNumber/2,
-		lnwire.NewMSatFromSatoshis(fundingAmt), 10)
+		lnwire.NewMSatFromSatoshis(fundingAmt), 1, 10)
 	bobChanReservation.SetNumConfsRequired(numReqConfs)
 
 	// We'll ensure that Bob's contribution also gets generated properly.
 	bobContribution := bobChanReservation.OurContribution()
-	bobContribution.CsvDelay = csvDelay
 	assertContributionInitPopulated(t, bobContribution)
 
 	// With his contribution generated, he can now process Alice's
