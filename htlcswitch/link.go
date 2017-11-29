@@ -680,9 +680,10 @@ func (l *channelLink) handleDownStreamPkt(pkt *htlcPacket, isReProcess bool) {
 				// Otherwise, we'll send back a proper failure
 				// message.
 				default:
-					reason, err = obfuscator.EncryptFirstHop(failure)
-					if err != nil {
-						log.Errorf("unable to obfuscate error: %v", err)
+					var err2 error
+					reason, err2 = obfuscator.EncryptFirstHop(failure)
+					if err2 != nil {
+						log.Errorf("unable to obfuscate error: %v", err2)
 						return
 					}
 					isObfuscated = true
@@ -1043,12 +1044,21 @@ type getBandwidthCmd struct {
 //
 // NOTE: Part of the ChannelLink interface.
 func (l *channelLink) Bandwidth() lnwire.MilliSatoshi {
-	// TODO(roasbeef): subtract reserve
 	channelBandwidth := l.channel.AvailableBalance()
 	overflowBandwidth := l.overflowQueue.TotalHtlcAmount()
-	reserve := lnwire.NewMSatFromSatoshis(l.channel.GetReserve())
+	linkBandwidth := channelBandwidth - overflowBandwidth
+	reserve := lnwire.NewMSatFromSatoshis(l.channel.LocalChanReserve())
 
-	return channelBandwidth - overflowBandwidth - reserve
+	// If the channel reserve is greater than the total available
+	// balance of the link, just return 0.
+	if linkBandwidth < reserve {
+		return 0
+	}
+
+	// Else the amount that is available to flow through the link at
+	// this point is the available balance minus the reserve amount
+	// we are required to keep as collateral.
+	return linkBandwidth - reserve
 }
 
 // policyUpdate is a message sent to a channel link when an outside sub-system
