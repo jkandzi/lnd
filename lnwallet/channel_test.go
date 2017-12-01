@@ -445,7 +445,6 @@ func assertOutputExistsByValue(t *testing.T, commitTx *wire.MsgTx,
 //  * DSL language perhaps?
 //  * constructed via input/output files
 func TestSimpleAddSettleWorkflow(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -703,7 +702,6 @@ func TestSimpleAddSettleWorkflow(t *testing.T) {
 // TestCheckCommitTxSize checks that estimation size of commitment
 // transaction with some degree of error corresponds to the actual size.
 func TestCheckCommitTxSize(t *testing.T) {
-	t.Parallel()
 
 	checkSize := func(channel *LightningChannel, count int) {
 		// Due to variable size of the signatures (70-73) in
@@ -782,7 +780,6 @@ func TestCheckCommitTxSize(t *testing.T) {
 }
 
 func TestCooperativeChannelClosure(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -847,7 +844,6 @@ func TestCooperativeChannelClosure(t *testing.T) {
 // peer is ForceClosing the channel. Will check outputs both above and below
 // the dust limit.
 func TestForceClose(t *testing.T) {
-	t.Parallel()
 
 	// TODO(roasbeef): modify to add some HTLC's before closing?
 
@@ -1040,7 +1036,6 @@ func TestForceClose(t *testing.T) {
 // active dust output (for only a single party due to asymmetric dust values),
 // then the force close summary is well crafted.
 func TestForceCloseDustOutput(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -1146,7 +1141,6 @@ func TestForceCloseDustOutput(t *testing.T) {
 // below the nodes' dust limit. In these cases, the amount of the dust HTLCs
 // should be applied to the commitment transaction fee.
 func TestDustHTLCFees(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -1223,7 +1217,6 @@ func TestDustHTLCFees(t *testing.T) {
 // In one commitment chain, the HTLC will be added as normal, in the other
 // chain, the amount of the HTLC will contribute to the fees to be paid.
 func TestHTLCDustLimit(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -1306,7 +1299,6 @@ func TestHTLCDustLimit(t *testing.T) {
 //
 // TODO(roasbeef): test needs to be fixed after reserve limits are done
 func TestChannelBalanceDustLimit(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -1367,7 +1359,6 @@ func TestChannelBalanceDustLimit(t *testing.T) {
 }
 
 func TestStateUpdatePersistence(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -1394,9 +1385,11 @@ func TestStateUpdatePersistence(t *testing.T) {
 			Expiry:      uint32(10),
 		}
 
+		fmt.Println("alice adding")
 		if _, err := aliceChannel.AddHTLC(h); err != nil {
 			t.Fatalf("unable to add alice's htlc: %v", err)
 		}
+		fmt.Println("bob receiving")
 		if _, err := bobChannel.ReceiveHTLC(h); err != nil {
 			t.Fatalf("unable to recv alice's htlc: %v", err)
 		}
@@ -1407,15 +1400,18 @@ func TestStateUpdatePersistence(t *testing.T) {
 		Amount:      htlcAmt,
 		Expiry:      uint32(10),
 	}
+	fmt.Println("bob adding")
 	if _, err := bobChannel.AddHTLC(bobh); err != nil {
 		t.Fatalf("unable to add bob's htlc: %v", err)
 	}
+	fmt.Println("alice receiving")
 	if _, err := aliceChannel.ReceiveHTLC(bobh); err != nil {
 		t.Fatalf("unable to recv bob's htlc: %v", err)
 	}
 
 	// Next, Alice initiates a state transition to include the HTLC's she
 	// added above in a new commitment state.
+	fmt.Println("forcing state transition to included alice's htlcs")
 	if err := forceStateTransition(aliceChannel, bobChannel); err != nil {
 		t.Fatalf("unable to complete alice's state transition: %v", err)
 	}
@@ -1424,6 +1420,8 @@ func TestStateUpdatePersistence(t *testing.T) {
 	// commitment transaction (but it was in Alice's, as he ACK'd her
 	// changes before creating a new state), Bob needs to trigger another
 	// state update in order to re-sync their states.
+
+	fmt.Println("forcing state transition to included bob's htlcs")
 	if err := forceStateTransition(bobChannel, aliceChannel); err != nil {
 		t.Fatalf("unable to complete bob's state transition: %v", err)
 	}
@@ -1651,7 +1649,6 @@ func TestStateUpdatePersistence(t *testing.T) {
 }
 
 func TestCancelHTLC(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -1763,7 +1760,6 @@ func TestCancelHTLC(t *testing.T) {
 }
 
 func TestCooperativeCloseDustAdherence(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -1925,7 +1921,6 @@ func TestCooperativeCloseDustAdherence(t *testing.T) {
 // TestUpdateFeeFail tests that the signature verification will fail if they
 // fee updates are out of sync.
 func TestUpdateFeeFail(t *testing.T) {
-	t.Parallel()
 
 	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
 	if err != nil {
@@ -1958,7 +1953,6 @@ func TestUpdateFeeFail(t *testing.T) {
 // expected if we send a fee update, and then the sender of the fee update
 // sends a commitment signature.
 func TestUpdateFeeSenderCommits(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -2070,7 +2064,6 @@ func TestUpdateFeeSenderCommits(t *testing.T) {
 // expected if we send a fee update, and then the receiver of the fee update
 // sends a commitment signature.
 func TestUpdateFeeReceiverCommits(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -2208,7 +2201,6 @@ func TestUpdateFeeReceiverCommits(t *testing.T) {
 // initiator fails, and that trying to initiate fee update as non-initiation
 // fails.
 func TestUpdateFeeReceiverSendsUpdate(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -2237,7 +2229,6 @@ func TestUpdateFeeReceiverSendsUpdate(t *testing.T) {
 // Test that if multiple update fee messages are sent consecutively, then the
 // last one is the one that is being committed to.
 func TestUpdateFeeMultipleUpdates(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -2348,7 +2339,6 @@ func TestUpdateFeeMultipleUpdates(t *testing.T) {
 // state machine to drive the balance to zero, then the next HTLC attempted to
 // be added will result in an error being returned.
 func TestAddHTLCNegativeBalance(t *testing.T) {
-	t.Parallel()
 
 	// We'll kick off the test by creating our channels which both are
 	// loaded with 5 BTC each.
@@ -2422,7 +2412,6 @@ func assertNoChanSyncNeeded(t *testing.T, aliceChannel *LightningChannel,
 // and a forced restart, both nodes conclude that they're fully synchronized
 // and don't need to retransmit any messages.
 func TestChanSyncFullySynced(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -2539,7 +2528,6 @@ func restartChannel(channelOld *LightningChannel) (*LightningChannel, error) {
 // to re-send the CommitDiff. After the diff has been sent, both nodes should
 // resynchronize and be able to complete the dangling commit.
 func TestChanSyncOweCommitment(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -2843,7 +2831,6 @@ func TestChanSyncOweCommitment(t *testing.T) {
 // needs to re-send the RevokeAndAck. After the revocation has been sent, both
 // nodes should be able to successfully complete another state transition.
 func TestChanSyncOweRevocation(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -3031,7 +3018,6 @@ func TestChanSyncOweRevocation(t *testing.T) {
 // but Alice doesn't receive them before the connection dies, then he'll
 // retransmit them both.
 func TestChanSyncOweRevocationAndCommit(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -3199,7 +3185,6 @@ func TestChanSyncOweRevocationAndCommit(t *testing.T) {
 // _identical_ CommitSig as he detects his commitment chain is ahead of
 // Alice's.
 func TestChanSyncOweRevocationAndCommitForceTransition(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -3382,7 +3367,6 @@ func TestChanSyncOweRevocationAndCommitForceTransition(t *testing.T) {
 // fee that would put them below their current reserve, then it's rejected by
 // the state machine.
 func TestFeeUpdateRejectInsaneFee(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -3408,7 +3392,6 @@ func TestFeeUpdateRejectInsaneFee(t *testing.T) {
 // TestChannelRetransmissionFeeUpdate tests that the initiator will include any
 // pending fee updates if it needs to retransmit signatures.
 func TestChannelRetransmissionFeeUpdate(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -3594,7 +3577,6 @@ func TestChannelRetransmissionFeeUpdate(t *testing.T) {
 // ChannelReestablish messages,then they reject the message and declare the
 // channel un-continuable by returning ErrCannotSyncCommitChains.
 func TestChanSyncUnableToSync(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -3631,7 +3613,6 @@ func TestChanSyncUnableToSync(t *testing.T) {
 // sends an invalid commit secret then both parties recognize this as possible
 // data loss.
 func TestChanSyncInvalidLastSecret(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
@@ -3721,7 +3702,6 @@ func TestChanSyncInvalidLastSecret(t *testing.T) {
 // returned within the commitment state of a channel after the transition is
 // initiated.
 func TestChanAvailableBandwidth(t *testing.T) {
-	t.Parallel()
 
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
