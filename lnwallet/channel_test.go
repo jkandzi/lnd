@@ -4188,7 +4188,7 @@ func TestMinHTLC(t *testing.T) {
 	// the htlc is too small.
 	_, err = bobChannel.ReceiveHTLC(htlc)
 	if err != nil {
-		t.Fatalf("error receiving htlc:", err)
+		t.Fatalf("error receiving htlc: %v", err)
 	}
 	err = forceStateTransition(aliceChannel, bobChannel)
 	if err != ErrBelowMinHTLC {
