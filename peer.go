@@ -1122,16 +1122,20 @@ func (p *peer) PingTime() int64 {
 }
 
 // queueMsg queues a new lnwire.Message to be eventually sent out on the
-// wire.
-func (p *peer) queueMsg(msg lnwire.Message, errChan chan error) {
+// wire. It returns an error if we failed queing the message. An error
+// is sent on errChan if the message fails being sent to the peer, or
+// nil otherwise.
+func (p *peer) queueMsg(msg lnwire.Message, errChan chan error) error {
 	select {
 	case p.outgoingQueue <- outgoinMsg{msg, errChan}:
+		return nil
 	case <-p.quit:
 		peerLog.Debugf("Peer shutting down, could not enqueue msg.")
+		err := fmt.Errorf("peer shutting down")
 		if errChan != nil {
-			errChan <- fmt.Errorf("peer shutting down")
+			errChan <- err
 		}
-		return
+		return err
 	}
 }
 
