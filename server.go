@@ -958,7 +958,10 @@ func (s *server) sendToPeer(target *btcec.PublicKey,
 // sendPeerMessages enqueues a list of messages into the outgoingQueue of the
 // `targetPeer`.  This method supports additional broadcast-level
 // synchronization by using the additional `wg` to coordinate a particular
-// broadcast.
+// broadcast. Since this method will wait for the return error from sending
+// each message, it should be run as a goroutine (see comment below) and
+// the error ignored if used for broadcasting messages, where the result
+// from sending the messages is not of importance.
 //
 // NOTE: This method must be invoked with a non-nil `wg` if it is spawned as a
 // go routine--both `wg` and the server's WaitGroup should be incremented
@@ -981,17 +984,28 @@ func (s *server) sendPeerMessages(
 		defer wg.Done()
 	}
 
+	// We queue each message, creating a slice of error channels that
+	// can be inspected after every message is successfully added to
+	// the queue.
+	var errChans []chan error
 	for _, msg := range msgs {
 		errChan := make(chan error, 1)
-		targetPeer.queueMsg(msg, errChan)
+		if err := targetPeer.queueMsg(msg, errChan); err != nil {
+			return err
+		}
+		errChans = append(errChans, errChan)
+	}
+
+	// Return an error if any of the messages failed being sent.
+	for _, errChan := range errChans {
 		select {
 		case err := <-errChan:
 			if err != nil {
-				srvrLog.Errorf("Failed queuing message: %v", err)
+				srvrLog.Errorf("Failed to queue message: %v", err)
 				return err
 			}
 		case <-s.quit:
-			return fmt.Errorf("server shutting down")
+			return ErrServerShuttingDown
 		}
 	}
 
