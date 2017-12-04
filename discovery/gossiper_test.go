@@ -976,7 +976,7 @@ func TestSignatureAnnouncementRetry(t *testing.T) {
 	}
 
 	select {
-	case err = <-ctx.gossiper.ProcessLocalAnnouncement(batch.chanUpdAnn,
+	case err = <-ctx.gossiper.ProcessLocalAnnouncement(batch.chanUpdAnn1,
 		localKey):
 	case <-time.After(2 * time.Second):
 		t.Fatal("did not process local announcement")
@@ -991,7 +991,7 @@ func TestSignatureAnnouncementRetry(t *testing.T) {
 	}
 
 	select {
-	case err = <-ctx.gossiper.ProcessRemoteAnnouncement(batch.chanUpdAnn,
+	case err = <-ctx.gossiper.ProcessRemoteAnnouncement(batch.chanUpdAnn2,
 		remoteKey):
 	case <-time.After(2 * time.Second):
 		t.Fatal("did not process remote announcement")
@@ -1158,7 +1158,7 @@ func TestSignatureAnnouncementRetryAtStartup(t *testing.T) {
 	}
 
 	select {
-	case err = <-ctx.gossiper.ProcessLocalAnnouncement(batch.chanUpdAnn,
+	case err = <-ctx.gossiper.ProcessLocalAnnouncement(batch.chanUpdAnn1,
 		localKey):
 	case <-time.After(2 * time.Second):
 		t.Fatal("did not process local announcement")
@@ -1173,7 +1173,7 @@ func TestSignatureAnnouncementRetryAtStartup(t *testing.T) {
 	}
 
 	select {
-	case err = <-ctx.gossiper.ProcessRemoteAnnouncement(batch.chanUpdAnn,
+	case err = <-ctx.gossiper.ProcessRemoteAnnouncement(batch.chanUpdAnn2,
 		remoteKey):
 	case <-time.After(2 * time.Second):
 		t.Fatal("did not process remote announcement")
@@ -1370,7 +1370,7 @@ func TestSignatureAnnouncementRetryAfterBroadcast(t *testing.T) {
 	}
 
 	select {
-	case err = <-ctx.gossiper.ProcessLocalAnnouncement(batch.chanUpdAnn,
+	case err = <-ctx.gossiper.ProcessLocalAnnouncement(batch.chanUpdAnn1,
 		localKey):
 	case <-time.After(2 * time.Second):
 		t.Fatal("did not process local announcement")
@@ -1385,7 +1385,7 @@ func TestSignatureAnnouncementRetryAfterBroadcast(t *testing.T) {
 	}
 
 	select {
-	case err = <-ctx.gossiper.ProcessRemoteAnnouncement(batch.chanUpdAnn,
+	case err = <-ctx.gossiper.ProcessRemoteAnnouncement(batch.chanUpdAnn2,
 		remoteKey):
 	case <-time.After(2 * time.Second):
 		t.Fatal("did not process remote announcement")
