@@ -1273,8 +1273,8 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(nMsg *networkMsg) []l
 				remotePeer = chanInfo.NodeKey1
 			}
 			// Since the remote peer might not be online
-			// we'll launch a goroutine that will deliver
-			// the proof when it comes online.
+			// we'll call a method that will attempt to
+			// deliver the proof when it comes online.
 			if err := d.sendAnnSigReliably(msg, remotePeer); err != nil {
 				err := errors.Errorf("unable to send reliably "+
 					"to remote for short_chan_id=%v: %v",
