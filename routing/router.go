@@ -815,14 +815,17 @@ func (r *ChannelRouter) processUpdate(msg interface{}) error {
 	case *channeldb.ChannelEdgeInfo:
 		// Prior to processing the announcement we first check if we
 		// already know of this channel, if so, then we can exit early.
+		channelID := lnwire.NewShortChanIDFromInt(msg.ChannelID)
+		fmt.Println("checking if edge exists", channelID)
 		_, _, exists, err := r.cfg.Graph.HasChannelEdge(msg.ChannelID)
 		if err != nil && err != channeldb.ErrGraphNoEdgesFound {
 			return errors.Errorf("unable to check for edge "+
 				"existence: %v", err)
 		} else if exists {
-			return newErrf(ErrIgnored, "Ignoring msg for known "+
-				"chan_id=%v", msg.ChannelID)
+			fmt.Println("does exist")
+			return ErrEdgeExists
 		}
+		fmt.Println("does not exist")
 
 		// Query the database for the existence of the two nodes in this
 		// channel. If not found, add a partial node to the database,
@@ -857,7 +860,6 @@ func (r *ChannelRouter) processUpdate(msg interface{}) error {
 		// Before we can add the channel to the channel graph, we need
 		// to obtain the full funding outpoint that's encoded within
 		// the channel ID.
-		channelID := lnwire.NewShortChanIDFromInt(msg.ChannelID)
 		fundingPoint, err := r.fetchChanPoint(&channelID)
 		if err != nil {
 			return errors.Errorf("unable to fetch chan point for "+

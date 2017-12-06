@@ -119,6 +119,8 @@ type Config struct {
 	// TODO(roasbeef): extract ann crafting + sign from fundingMgr into
 	// here?
 	AnnSigner lnwallet.MessageSigner
+
+	AnnSigRetryTimeout time.Duration
 }
 
 // AuthenticatedGossiper is a subsystem which is responsible for receiving
@@ -1037,6 +1039,7 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(nMsg *networkMsg) []l
 				nMsg.err <- err
 				return nil
 			}
+			fmt.Println("PROOF VALID")
 
 			// If the proof checks out, then we'll save the proof
 			// itself to the database so we can fetch it later when
@@ -1073,12 +1076,64 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(nMsg *networkMsg) []l
 		// present in this channel are not present in the database, a
 		// partial node will be added to represent each node while we
 		// wait for a node announcement.
+		fmt.Println("adding edege")
 		if err := d.cfg.Router.AddEdge(edge); err != nil {
-			if routing.IsError(err, routing.ErrOutdated,
-				routing.ErrIgnored) {
+			fmt.Println("problem adding edge", err)
+			if err == routing.ErrEdgeExists {
 
+				chanInfo, e1, e2, err := d.cfg.Router.GetChannelByID(
+					msg.ShortChannelID)
+				if err != nil {
+					log.Errorf("Failed fetching channel edge: %v", err)
+					nMsg.err <- err
+					return nil
+				}
+				// If the edge already exists in the graph, but has no
+				// proof attached, we can add that now. This can be the
+				// case if we create a channel, but for some reason
+				// fail to receive the remote peer's proof, while the
+				// remote peer is able to fully assemble the proof and
+				// craft the ChannelAnnouncement.
+				if chanInfo.AuthProof == nil && proof != nil {
+					fmt.Println("creating new chan announcement")
+					chanAnn, e1Ann, e2Ann := createChanAnnouncement(proof, chanInfo, e1, e2)
+
+					// With all the necessary components assembled validate the
+					// full channel announcement proof.
+					if err := ValidateChannelAnn(chanAnn); err != nil {
+						err := errors.Errorf("channel  announcement proof "+
+							"for short_chan_id=%v isn't valid: %v",
+							msg.ShortChannelID, err)
+
+						log.Error(err)
+						nMsg.err <- err
+						return nil
+					}
+					err = d.cfg.Router.AddProof(msg.ShortChannelID, proof)
+					if err != nil {
+						err := errors.Errorf("unable add proof to the "+
+							"channel chanID=%v: %v", msg.ShortChannelID, err)
+						log.Error(err)
+						nMsg.err <- err
+						return nil
+					}
+					announcements = append(announcements, chanAnn)
+					if e1Ann != nil {
+						announcements = append(announcements, e1Ann)
+					}
+					if e2Ann != nil {
+						announcements = append(announcements, e2Ann)
+					}
+
+					nMsg.err <- nil
+					return announcements
+
+				}
+			} else if routing.IsError(err, routing.ErrOutdated,
+				routing.ErrIgnored) {
 				log.Debugf("Router rejected channel edge: %v",
 					err)
+
 			} else {
 				log.Errorf("Router rejected channel edge: %v",
 					err)
@@ -1379,6 +1434,7 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(nMsg *networkMsg) []l
 			nMsg.err <- err
 			return nil
 		}
+		fmt.Printf("proof added to db for id %v \n", msg.ShortChannelID)
 
 		if err := d.waitingProofs.Remove(proof.OppositeKey()); err != nil {
 			err := errors.Errorf("unable remove opposite proof "+
@@ -1463,6 +1519,19 @@ func (d *AuthenticatedGossiper) sendAnnSigReliably(
 			if err == nil {
 				// Sending succeeded, we can
 				// continue the flow.
+				time.Sleep(d.cfg.AnnSigRetryTimeout)
+				chanInfo, _, _, err := d.cfg.Router.GetChannelByID(msg.ShortChannelID)
+				if err != nil {
+					log.Error("unable to find channel info for channel %v",
+						msg.ShortChannelID)
+					return
+				}
+
+				if chanInfo.AuthProof == nil {
+					fmt.Printf("no proof for id %v, resending\n", msg.ShortChannelID)
+					continue
+				}
+				fmt.Println("have proof, breaking")
 				break
 			}
 
@@ -1488,9 +1557,25 @@ func (d *AuthenticatedGossiper) sendAnnSigReliably(
 		log.Infof("Sent channel announcement proof to remote peer: %x",
 			remotePeer.SerializeCompressed())
 
+		// We now check if the full channel proof exists in out graph.
+		//
+		// 1. If it does, we have successfully received the remote proof
+		// and assembled the full proof. In this case we can safely
+		// delete the local proof from the database. In case the
+		// remote hasn't been able to assemble the full proof yet
+		// (maybe because of a crash), we will send them the full
+		// proof if we notice that they retry sending their half
+		// proof.
+		// 2. If the full proof does not exist in the graph,
+		// it means that we haven't received the remote proof
+		// yet (or that we crashed before able to assemble the
+		// full proof). Since the remote node might think they
+		// have delivered their proof to us, we will resend _our_
+		// proof to trigger a resend on their part: they will then
+		// be able to assemble and send us the full proof.
 		// Since the message was successfully sent to the peer, we
 		// can safely delete it from the database.
-		err := d.cfg.DB.Update(func(tx *bolt.Tx) error {
+		if err := d.cfg.DB.Update(func(tx *bolt.Tx) error {
 			bucket := tx.Bucket(messageStoreKey)
 			if bucket == nil {
 				return fmt.Errorf("bucket unexpectedly did " +
@@ -1498,8 +1583,7 @@ func (d *AuthenticatedGossiper) sendAnnSigReliably(
 			}
 
 			return bucket.Delete(key[:])
-		})
-		if err != nil {
+		}); err != nil {
 			log.Errorf("Failed deleting message from database: %v",
 				err)
 			return

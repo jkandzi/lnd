@@ -565,6 +565,18 @@ func (c *ChannelGraph) UpdateChannelEdge(edge *ChannelEdgeInfo) error {
 		return putChanEdgeInfo(edgeIndex, edge, chanKey)
 	})
 }
+func (c *ChannelGraph) HasAuthProof(chanID uint64) (bool, error) {
+	info, _, _, err := c.FetchChannelEdgesByID(chanID)
+	if err != nil && err != ErrGraphNoEdgesFound && err != ErrGraphNotFound {
+		return false, err
+	}
+	if err == ErrGraphNoEdgesFound || err == ErrGraphNotFound || info.AuthProof == nil {
+		return false, nil
+
+	}
+
+	return true, nil
+}
 
 const (
 	// pruneTipBytes is the total size of the value which stores a prune

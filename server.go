@@ -32,6 +32,10 @@ import (
 	"github.com/lightningnetwork/lnd/htlcswitch"
 )
 
+const (
+	defaultAnnSigRetryTimeoutMs = 5000
+)
+
 var (
 	// ErrPeerNotFound signals that the server has no connection to the
 	// given peer.
@@ -297,17 +301,18 @@ func newServer(listenAddrs []string, chanDB *channeldb.DB, cc *chainControl,
 	}
 
 	s.authGossiper, err = discovery.New(discovery.Config{
-		Router:           s.chanRouter,
-		Notifier:         s.cc.chainNotifier,
-		ChainHash:        *activeNetParams.GenesisHash,
-		Broadcast:        s.BroadcastMessage,
-		SendToPeer:       s.SendToPeer,
-		NotifyWhenOnline: s.NotifyWhenOnline,
-		ProofMatureDelta: 0,
-		TrickleDelay:     time.Millisecond * time.Duration(cfg.TrickleDelay),
-		RetransmitDelay:  time.Minute * 30,
-		DB:               chanDB,
-		AnnSigner:        s.nodeSigner,
+		Router:             s.chanRouter,
+		Notifier:           s.cc.chainNotifier,
+		ChainHash:          *activeNetParams.GenesisHash,
+		Broadcast:          s.BroadcastMessage,
+		SendToPeer:         s.SendToPeer,
+		NotifyWhenOnline:   s.NotifyWhenOnline,
+		ProofMatureDelta:   0,
+		TrickleDelay:       time.Millisecond * time.Duration(cfg.TrickleDelay),
+		RetransmitDelay:    time.Minute * 30,
+		DB:                 chanDB,
+		AnnSigner:          s.nodeSigner,
+		AnnSigRetryTimeout: defaultAnnSigRetryTimeoutMs * time.Millisecond,
 	},
 		s.identityPriv.PubKey(),
 	)

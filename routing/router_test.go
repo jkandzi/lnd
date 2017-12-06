@@ -466,7 +466,70 @@ func TestAddProof(t *testing.T) {
 
 	info, _, _, err := ctx.router.GetChannelByID(*chanID)
 	if info.AuthProof == nil {
-		t.Fatal("proof have been updated")
+		t.Fatal("proof has not been updated")
+	}
+}
+
+// TestAddProofFromChannelEdgeInfo tests that we are able to add a
+// AuthProof to one of the edges in the graph by adding the edge
+// again, containing the AuthProof.
+func TestAddProofFromChannelEdgeInfo(t *testing.T) {
+	t.Parallel()
+
+	ctx, cleanup, err := createTestCtx(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	// Before creating out edge, we'll create two new nodes within the
+	// network that the channel will connect.
+	node1, err := createTestNode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	node2, err := createTestNode()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// In order to be able to add the edge we should have a valid funding
+	// UTXO within the blockchain.
+	fundingTx, _, chanID, err := createChannelEdge(ctx,
+		bitcoinKey1.SerializeCompressed(), bitcoinKey2.SerializeCompressed(),
+		100, 0)
+	if err != nil {
+		t.Fatalf("unable create channel edge: %v", err)
+	}
+	fundingBlock := &wire.MsgBlock{
+		Transactions: []*wire.MsgTx{fundingTx},
+	}
+	ctx.chain.addBlock(fundingBlock, chanID.BlockHeight, chanID.BlockHeight)
+
+	// After utxo was recreated adding the edge without the proof.
+	edge := &channeldb.ChannelEdgeInfo{
+		ChannelID:   chanID.ToUint64(),
+		NodeKey1:    copyPubKey(node1.PubKey),
+		NodeKey2:    copyPubKey(node2.PubKey),
+		BitcoinKey1: copyPubKey(bitcoinKey1),
+		BitcoinKey2: copyPubKey(bitcoinKey2),
+		AuthProof:   nil,
+	}
+
+	if err := ctx.router.AddEdge(edge); err != nil {
+		t.Fatalf("unable to add edge: %v", err)
+	}
+
+	// Now add the edge again, this time with the proof attached.
+	edge.AuthProof = &testAuthProof
+	if err := ctx.router.AddEdge(edge); err != nil {
+		t.Fatalf("unable to add edge: %v", err)
+	}
+
+	// Check that it has been properly updated.
+	info, _, _, err := ctx.router.GetChannelByID(*chanID)
+	if info.AuthProof == nil {
+		t.Fatal("proof has not been updated")
 	}
 }
 

@@ -1,6 +1,10 @@
 package routing
 
-import "github.com/go-errors/errors"
+import (
+	"fmt"
+
+	"github.com/go-errors/errors"
+)
 
 // errorCode is used to represent the various errors that can occur within this
 // package.
@@ -39,6 +43,8 @@ const (
 	// announcement was given for node not found in any channel.
 	ErrIgnored
 )
+
+var ErrEdgeExists = fmt.Errorf("edge already exists")
 
 // routerError is a structure that represent the error inside the routing package,
 // this structure carries additional information about error code in order to
