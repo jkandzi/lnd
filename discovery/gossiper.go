@@ -335,62 +335,16 @@ func (d *AuthenticatedGossiper) Start() error {
 	}
 	d.bestHeight = height
 
-	d.wg.Add(1)
-	go d.networkHandler()
-
 	// In case we had an AnnounceSignatures ready to be sent when the
 	// gossiper was last shut down, we must continue on our quest to
 	// deliver this message to our peer such that they can craft the
 	// full channel proof.
-	type msgTuple struct {
-		peer *btcec.PublicKey
-		msg  *lnwire.AnnounceSignatures
-	}
-
-	// Fetch all the AnnounceSignatures messages that was added
-	// to the database, but not sent to the peer.
-	var msgsResend []msgTuple
-	err = d.cfg.DB.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(messageStoreKey)
-		if bucket == nil {
-			return nil
-		}
-
-		// Iterate over each message added to the database.
-		if err := bucket.ForEach(func(k, v []byte) error {
-			r := bytes.NewReader(v)
-			msg := &lnwire.AnnounceSignatures{}
-			if err := msg.Decode(r, 0); err != nil {
-				return err
-			}
-			peer, err := btcec.ParsePubKey(k[:33], btcec.S256())
-			if err != nil {
-				return err
-			}
-			t := msgTuple{peer, msg}
-
-			// Add the message to the slice, such that we
-			// can resend it after the database transaction
-			// is over.
-			msgsResend = append(msgsResend, t)
-			return nil
-		}); err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
+	if err := d.resendAnnounceSignatures(); err != nil {
 		return err
 	}
 
-	// Now again try to send these messages to the peer. This method
-	// will retry sending until it succeeds, or the gossiper is shut
-	// down.
-	for _, t := range msgsResend {
-		if err := d.sendAnnSigReliably(t.msg, t.peer); err != nil {
-			return err
-		}
-	}
+	d.wg.Add(1)
+	go d.networkHandler()
 
 	return nil
 }
@@ -586,6 +540,68 @@ func (d *deDupedAnnouncements) Emit() []lnwire.Message {
 
 	// Return the array of lnwire.messages.
 	return announcements
+}
+
+// resendAnnounceSignatures will inspect the messageStore database
+// bucket for AnnounceSignatures messages that did not get
+// succesfully delivered to the remote peer. It will then attempt
+// to resend these messages, and update the database accordingly
+// when successfully sent.
+func (d *AuthenticatedGossiper) resendAnnounceSignatures() error {
+	type msgTuple struct {
+		peer *btcec.PublicKey
+		msg  *lnwire.AnnounceSignatures
+	}
+
+	// Fetch all the AnnounceSignatures messages that was added
+	// to the database, but not sent to the peer.
+	var msgsResend []msgTuple
+	if err := d.cfg.DB.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(messageStoreKey)
+		if bucket == nil {
+			return nil
+		}
+
+		// Iterate over each message added to the database.
+		if err := bucket.ForEach(func(k, v []byte) error {
+			// The database value represents the encoded
+			// AnnounceSignatures message.
+			r := bytes.NewReader(v)
+			msg := &lnwire.AnnounceSignatures{}
+			if err := msg.Decode(r, 0); err != nil {
+				return err
+			}
+
+			// THe first 33 bytes of the database key is
+			// the peer's public key.
+			peer, err := btcec.ParsePubKey(k[:33], btcec.S256())
+			if err != nil {
+				return err
+			}
+			t := msgTuple{peer, msg}
+
+			// Add the message to the slice, such that we
+			// can resend it after the database transaction
+			// is over.
+			msgsResend = append(msgsResend, t)
+			return nil
+		}); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Now again try to send these messages to the peer. This method
+	// will retry sending until it succeeds, or the gossiper is shut
+	// down.
+	for _, t := range msgsResend {
+		if err := d.sendAnnSigReliably(t.msg, t.peer); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // networkHandler is the primary goroutine that drives this service. The roles
