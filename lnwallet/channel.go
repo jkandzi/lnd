@@ -3623,6 +3623,16 @@ func (lc *LightningChannel) ReceiveNewCommitment(commitSig *btcec.Signature,
 	// our local commitment chain.
 	localCommitmentView.sig = commitSig.Serialize()
 	lc.localCommitChain.addCommitment(localCommitmentView)
+	// TODO: remove -------------------
+	ourBalance := localCommitmentView.ourBalance
+	theirBalance := localCommitmentView.theirBalance
+	if ourBalance < 0 {
+		return fmt.Errorf("negative balance:", ourBalance)
+	}
+	if theirBalance < 0 {
+		return fmt.Errorf("negative balance:", theirBalance)
+	}
+	// end remove -----------------------
 
 	// If we are not channel initiator, then the commitment just received
 	// would've signed any received fee update since last commitment. Mark
@@ -4777,7 +4787,8 @@ func (lc *LightningChannel) availableBalance() (lnwire.MilliSatoshi, int64) {
 
 	// Next we'll grab the current set of log updates that are still active
 	// and haven't been garbage collected.
-	htlcView := lc.fetchHTLCView(lc.remoteUpdateLog.logIndex,
+	remoteACKedIndex := lc.localCommitChain.tail().theirMessageIndex
+	htlcView := lc.fetchHTLCView(remoteACKedIndex,
 		lc.localUpdateLog.logIndex)
 	feePerKw := lc.channelState.LocalCommitment.FeePerKw
 	dustLimit := lc.channelState.LocalChanCfg.DustLimit

@@ -3870,3 +3870,53 @@ func TestSignCommitmentFailNotLockedIn(t *testing.T) {
 }
 
 // TODO(roasbeef): testing.Quick test case for retrans!!!
+
+// TestDesyncHTLCs checks that we cannot add HTLCs that would make the
+// balance negative, when the remote and locak update logs are desynced.
+func TestDesyncHTLCs(t *testing.T) {
+	t.Parallel()
+
+	// We'll kick off the test by creating our channels which both are
+	// loaded with 5 BTC each.
+	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	if err != nil {
+		t.Fatalf("unable to create test channels: %v", err)
+	}
+	defer cleanUp()
+
+	// First add one HTLC of value 4.1 BTC.
+	htlcAmt := lnwire.NewMSatFromSatoshis(4.1 * btcutil.SatoshiPerBitcoin)
+	htlc, preimage := createHTLC(0, htlcAmt)
+	if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+		t.Fatalf("unable to add htlc: %v", err)
+	}
+	if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
+		t.Fatalf("unable to recv htlc: %v", err)
+	}
+
+	// Now let let Bob fail this HTLC.
+	fmt.Println("failing htlc")
+	paymentHash := sha256.Sum256(preimage[:])
+	htlcCancelIndex, err := bobChannel.FailHTLC(paymentHash, []byte("failreason"))
+	if err != nil {
+		t.Fatalf("unable to cancel HTLC: %v", err)
+	}
+	if _, err := aliceChannel.ReceiveFailHTLC(htlcCancelIndex, []byte("bad")); err != nil {
+		t.Fatalf("unable to recv htlc cancel: %v", err)
+	}
+
+	// Alice now has gotten all here original balance (5 BTC) back,
+	// however, adding a new HTLC at this point SHOULD fail, since
+	// if she add the HTLC and sign the next state, Bob cannot assume
+	// she received the FailHTLC, and must assume she doesn't have
+	// the necessary balance available.
+	//
+	// We try adding an HTLC of value 1 BTC, which should fail
+	// because the balance is unavailable.
+	htlcAmt = lnwire.NewMSatFromSatoshis(1 * btcutil.SatoshiPerBitcoin)
+	htlc, _ = createHTLC(1, htlcAmt)
+	_, err = aliceChannel.AddHTLC(htlc)
+	if err != ErrInsufficientBalance {
+		t.Fatalf("expected ErrMaxHTLCNumber, instead received: %v", err)
+	}
+}

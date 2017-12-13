@@ -1552,6 +1552,7 @@ func TestChannelLinkBandwidthConsistency(t *testing.T) {
 	}
 	aliceLink.HandleChannelUpdate(htlcSettle)
 	time.Sleep(time.Millisecond * 100)
+	// FAILS BECAUSE htlcSettle is not ACKed.
 	assertLinkBandwidth(t, aliceLink, aliceStartingBandwidth-htlcAmt)
 
 	// Next, we'll add another HTLC initiated by the switch (of the same
