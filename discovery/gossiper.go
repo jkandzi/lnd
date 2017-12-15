@@ -995,6 +995,7 @@ func (d *AuthenticatedGossiper) processFeeChanUpdate(feeUpdate *feeUpdateRequest
 		edge.FeeProportionalMillionths = lnwire.MilliSatoshi(
 			feeUpdate.newSchema.FeeRate,
 		)
+		edge.TimeLockDelta = uint16(feeUpdate.newSchema.TimeLockDelta)
 
 		// Re-sign and update the backing ChannelGraphSource, and
 		// retrieve our ChannelUpdate to broadcast.
