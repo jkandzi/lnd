@@ -92,6 +92,10 @@ type FeeSchema struct {
 	// the effective fee rate charged per mSAT will be: (amount *
 	// FeeRate/1,000,000).
 	FeeRate uint32
+
+	// TimeLockDelta is the required HTLC timelock delta to be used
+	// when forwarding payments.
+	TimeLockDelta uint32
 }
 
 // Config defines the configuration for the ChannelRouter. ALL elements within
