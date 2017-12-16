@@ -3201,11 +3201,11 @@ const minFeeRate = 1e-6
 
 // UpdateFees allows the caller to update the fee schedule for all channels
 // globally, or a particular channel.
-func (r *rpcServer) UpdateFees(ctx context.Context,
-	req *lnrpc.FeeUpdateRequest) (*lnrpc.FeeUpdateResponse, error) {
+func (r *rpcServer) UpdateChannelPolicy(ctx context.Context,
+	req *lnrpc.PolicyUpdateRequest) (*lnrpc.PolicyUpdateResponse, error) {
 
 	if r.authSvc != nil {
-		if err := macaroons.ValidateMacaroon(ctx, "udpatefees",
+		if err := macaroons.ValidateMacaroon(ctx, "updatechannelpolicy",
 			r.authSvc); err != nil {
 			return nil, err
 		}
@@ -3215,11 +3215,11 @@ func (r *rpcServer) UpdateFees(ctx context.Context,
 	switch scope := req.Scope.(type) {
 	// If the request is targeting all active channels, then we don't need
 	// target any channels by their channel point.
-	case *lnrpc.FeeUpdateRequest_Global:
+	case *lnrpc.PolicyUpdateRequest_Global:
 
 	// Otherwise, we're targeting an individual channel by its channel
 	// point.
-	case *lnrpc.FeeUpdateRequest_ChanPoint:
+	case *lnrpc.PolicyUpdateRequest_ChanPoint:
 		txid, err := chainhash.NewHash(scope.ChanPoint.FundingTxid)
 		if err != nil {
 			return nil, err
@@ -3233,10 +3233,17 @@ func (r *rpcServer) UpdateFees(ctx context.Context,
 	}
 
 	// As a sanity check, we'll ensure that the passed fee rate is below
-	// 1e-6, or the lowest allowed fee rate.
+	// 1e-6, or the lowest allowed fee rate, and that the passed timelock
+	// is large enough.
 	if req.FeeRate < minFeeRate {
 		return nil, fmt.Errorf("fee rate of %v is too small, min fee "+
 			"rate is %v", req.FeeRate, minFeeRate)
+	}
+
+	if req.TimeLockDelta < minTimeLockDelta {
+		return nil, fmt.Errorf("time lock delta of %v is too small, "+
+			"minimum supported is %v", req.TimeLockDelta,
+			minTimeLockDelta)
 	}
 
 	// We'll also need to convert the floating point fee rate we accept
@@ -3247,8 +3254,9 @@ func (r *rpcServer) UpdateFees(ctx context.Context,
 	feeRateFixed := uint32(req.FeeRate * feeBase)
 	baseFeeMsat := lnwire.MilliSatoshi(req.BaseFeeMsat)
 	feeSchema := routing.FeeSchema{
-		BaseFee: baseFeeMsat,
-		FeeRate: feeRateFixed,
+		BaseFee:       baseFeeMsat,
+		FeeRate:       feeRateFixed,
+		TimeLockDelta: req.TimeLockDelta,
 	}
 
 	rpcsLog.Tracef("[updatefees] updating fee schedule base_fee=%v, "+
@@ -3272,8 +3280,9 @@ func (r *rpcServer) UpdateFees(ctx context.Context,
 	// We create a partially policy as the logic won't overwrite a valid
 	// sub-policy with a "nil" one.
 	p := htlcswitch.ForwardingPolicy{
-		BaseFee: baseFeeMsat,
-		FeeRate: lnwire.MilliSatoshi(feeRateFixed),
+		BaseFee:       baseFeeMsat,
+		FeeRate:       lnwire.MilliSatoshi(feeRateFixed),
+		TimeLockDelta: req.TimeLockDelta,
 	}
 	err = r.server.htlcSwitch.UpdateForwardingPolicies(p, targetChans...)
 	if err != nil {
@@ -3283,5 +3292,5 @@ func (r *rpcServer) UpdateFees(ctx context.Context,
 		rpcsLog.Warnf("Unable to update link fees: %v", err)
 	}
 
-	return &lnrpc.FeeUpdateResponse{}, nil
+	return &lnrpc.PolicyUpdateResponse{}, nil
 }
