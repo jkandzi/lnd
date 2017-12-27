@@ -3,6 +3,7 @@ package routing
 import (
 	"bytes"
 	"fmt"
+	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -31,9 +32,9 @@ const (
 	DefaultFinalCLTVDelta = 9
 )
 
-// ChannelGraphSource represent the source of information about the topology of
-// lightning network, it responsible for addition of nodes, edges
-// and applying edges updates, return the current block with with out
+// ChannelGraphSource represents the source of information about the topology of
+// the lightning network. It's responsible for the addition of nodes, edges,
+// applying edge updates, and returning the current block height with which the
 // topology is synchronized.
 type ChannelGraphSource interface {
 	// AddNode is used to add information about a node to the router
@@ -55,7 +56,7 @@ type ChannelGraphSource interface {
 	UpdateEdge(policy *channeldb.ChannelEdgePolicy) error
 
 	// ForAllOutgoingChannels is used to iterate over all channels
-	// eminating from the "source" node which is the center of the
+	// emanating from the "source" node which is the center of the
 	// star-graph.
 	ForAllOutgoingChannels(cb func(c *channeldb.ChannelEdgeInfo,
 		e *channeldb.ChannelEdgePolicy) error) error
@@ -78,7 +79,7 @@ type ChannelGraphSource interface {
 }
 
 // FeeSchema is the set fee configuration for a Lighting Node on the network.
-// Using the coefficients described within he schema, the required fee to
+// Using the coefficients described within the schema, the required fee to
 // forward outgoing payments can be derived.
 type FeeSchema struct {
 	// BaseFee is the base amount of milli-satoshis that will be chained
@@ -273,13 +274,27 @@ func (r *ChannelRouter) Start() error {
 	r.newBlocks = r.cfg.ChainView.FilteredBlocks()
 	r.staleBlocks = r.cfg.ChainView.DisconnectedBlocks()
 
-	_, pruneHeight, err := r.cfg.Graph.PruneTip()
+	bestHash, bestHeight, err := r.cfg.Chain.GetBestBlock()
 	if err != nil {
+		return err
+	}
+
+	if _, _, err := r.cfg.Graph.PruneTip(); err != nil {
 		switch {
 		// If the graph has never been pruned, or hasn't fully been
 		// created yet, then we don't treat this as an explicit error.
 		case err == channeldb.ErrGraphNeverPruned:
+			fallthrough
 		case err == channeldb.ErrGraphNotFound:
+			// If the graph has never been pruned, then we'll set
+			// the prune height to the current best height of the
+			// chain backend.
+			_, err = r.cfg.Graph.PruneGraph(
+				nil, bestHash, uint32(bestHeight),
+			)
+			if err != nil {
+				return err
+			}
 		default:
 			return err
 		}
@@ -295,9 +310,13 @@ func (r *ChannelRouter) Start() error {
 	}
 
 	log.Infof("Filtering chain using %v channels active", len(channelView))
-	err = r.cfg.ChainView.UpdateFilter(channelView, pruneHeight)
-	if err != nil {
-		return err
+	if len(channelView) != 0 {
+		err = r.cfg.ChainView.UpdateFilter(
+			channelView, uint32(bestHeight),
+		)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Before we begin normal operation of the router, we first need to
@@ -478,35 +497,59 @@ func (r *ChannelRouter) networkHandler() {
 	graphPruneTicker := time.NewTicker(r.cfg.GraphPruneInterval)
 	defer graphPruneTicker.Stop()
 
+	// We'll use this validation barrier to ensure that we process all jobs
+	// in the proper order during parallel validation.
+	validationBarrier := NewValidationBarrier(runtime.NumCPU()*10, r.quit)
+
 	for {
 		select {
 		// A new fully validated network update has just arrived. As a
 		// result we'll modify the channel graph accordingly depending
 		// on the exact type of the message.
 		case updateMsg := <-r.networkUpdates:
-			// Process the routing update to determine if this is
-			// either a new update from our PoV or an update to a
-			// prior vertex/edge we previously accepted.
-			err := r.processUpdate(updateMsg.msg)
-			updateMsg.err <- err
-			if err != nil {
-				continue
-			}
+			// We'll set up any dependants, and wait until a free
+			// slot for this job opens up, this allow us to not
+			// have thousands of goroutines active.
+			validationBarrier.InitJobDependancies(updateMsg.msg)
 
-			// Send off a new notification for the newly accepted
-			// update.
-			topChange := &TopologyChange{}
-			err = addToTopologyChange(r.cfg.Graph, topChange,
-				updateMsg.msg)
-			if err != nil {
-				log.Errorf("unable to update topology "+
-					"change notification: %v", err)
-				continue
-			}
+			go func() {
+				defer validationBarrier.CompleteJob()
 
-			if !topChange.isEmpty() {
-				r.notifyTopologyChange(topChange)
-			}
+				// If this message has an existing dependency,
+				// then we'll wait until that has been fully
+				// validated before we proceed.
+				validationBarrier.WaitForDependants(updateMsg.msg)
+
+				// Process the routing update to determine if
+				// this is either a new update from our PoV or
+				// an update to a prior vertex/edge we
+				// previously accepted.
+				err := r.processUpdate(updateMsg.msg)
+				updateMsg.err <- err
+
+				// If this message had any dependencies, then
+				// we can now signal them to continue.
+				validationBarrier.SignalDependants(updateMsg.msg)
+
+				if err != nil {
+					return
+				}
+
+				// Send off a new notification for the newly
+				// accepted update.
+				topChange := &TopologyChange{}
+				err = addToTopologyChange(r.cfg.Graph, topChange,
+					updateMsg.msg)
+				if err != nil {
+					log.Errorf("unable to update topology "+
+						"change notification: %v", err)
+					return
+				}
+
+				if !topChange.isEmpty() {
+					r.notifyTopologyChange(topChange)
+				}
+			}()
 
 			// TODO(roasbeef): remove all unconnected vertexes
 			// after N blocks pass with no corresponding
@@ -522,7 +565,7 @@ func (r *ChannelRouter) networkHandler() {
 			// Since this block is stale, we update our best height
 			// to the previous block.
 			blockHeight := uint32(chainUpdate.Height)
-			r.bestHeight = blockHeight - 1
+			atomic.StoreUint32(&r.bestHeight, blockHeight-1)
 
 			// Update the channel graph to reflect that this block
 			// was disconnected.
@@ -550,10 +593,23 @@ func (r *ChannelRouter) networkHandler() {
 				return
 			}
 
+			// We'll ensure that any new blocks received attach
+			// directly to the end of our main chain. If not, then
+			// we've somehow missed some blocks. We don't process
+			// this block as otherwise, we may miss on-chain
+			// events.
+			currentHeight := atomic.LoadUint32(&r.bestHeight)
+			if chainUpdate.Height != currentHeight+1 {
+				log.Errorf("out of order block: expecting "+
+					"height=%v, got height=%v", currentHeight+1,
+					chainUpdate.Height)
+				continue
+			}
+
 			// Once a new block arrives, we update our running
 			// track of the height of the chain tip.
 			blockHeight := uint32(chainUpdate.Height)
-			r.bestHeight = blockHeight
+			atomic.StoreUint32(&r.bestHeight, blockHeight)
 			log.Infof("Pruning channel graph using block %v (height=%v)",
 				chainUpdate.Hash, blockHeight)
 
@@ -613,8 +669,13 @@ func (r *ChannelRouter) networkHandler() {
 			clientID := ntfnUpdate.clientID
 
 			if ntfnUpdate.cancel {
-				if client, ok := r.topologyClients[ntfnUpdate.clientID]; ok {
+				r.RLock()
+				client, ok := r.topologyClients[ntfnUpdate.clientID]
+				r.RUnlock()
+				if ok {
+					r.Lock()
 					delete(r.topologyClients, clientID)
+					r.Unlock()
 
 					close(client.exit)
 					client.wg.Wait()
@@ -625,10 +686,12 @@ func (r *ChannelRouter) networkHandler() {
 				continue
 			}
 
+			r.Lock()
 			r.topologyClients[ntfnUpdate.clientID] = &topologyClient{
 				ntfnChan: ntfnUpdate.ntfnChan,
 				exit:     make(chan struct{}),
 			}
+			r.Unlock()
 
 		// The graph prune ticker has ticked, so we'll examine the
 		// state of the known graph to filter out any zombie channels
@@ -869,7 +932,9 @@ func (r *ChannelRouter) processUpdate(msg interface{}) error {
 		// FilteredChainView so we are notified if/when this channel is
 		// closed.
 		filterUpdate := []wire.OutPoint{*fundingPoint}
-		err = r.cfg.ChainView.UpdateFilter(filterUpdate, r.bestHeight)
+		err = r.cfg.ChainView.UpdateFilter(
+			filterUpdate, atomic.LoadUint32(&r.bestHeight),
+		)
 		if err != nil {
 			return errors.Errorf("unable to update chain "+
 				"view: %v", err)
@@ -890,11 +955,11 @@ func (r *ChannelRouter) processUpdate(msg interface{}) error {
 		// the direction of the edge they control. Therefore we first
 		// check if we already have the most up to date information for
 		// that edge. If so, then we can exit early.
-		switch msg.Flags {
+		switch {
 
 		// A flag set of 0 indicates this is an announcement for the
 		// "first" node in the channel.
-		case 0:
+		case msg.Flags&lnwire.ChanUpdateDirection == 0:
 			if edge1Timestamp.After(msg.LastUpdate) ||
 				edge1Timestamp.Equal(msg.LastUpdate) {
 				return newErrf(ErrIgnored, "Ignoring update "+
@@ -905,7 +970,7 @@ func (r *ChannelRouter) processUpdate(msg interface{}) error {
 
 		// Similarly, a flag set of 1 indicates this is an announcement
 		// for the "second" node in the channel.
-		case 1:
+		case msg.Flags&lnwire.ChanUpdateDirection == 1:
 			if edge2Timestamp.After(msg.LastUpdate) ||
 				edge2Timestamp.Equal(msg.LastUpdate) {
 
@@ -1009,7 +1074,7 @@ type routingMsg struct {
 
 // pruneNodeFromRoutes accepts set of routes, and returns a new set of routes
 // with the target node filtered out.
-func pruneNodeFromRoutes(routes []*Route, skipNode vertex) []*Route {
+func pruneNodeFromRoutes(routes []*Route, skipNode Vertex) []*Route {
 
 	// TODO(roasbeef): pass in slice index?
 
@@ -1130,7 +1195,7 @@ func (r *ChannelRouter) FindRoutes(target *btcec.PublicKey,
 	// aren't able to support the total satoshis flow once fees have been
 	// factored in.
 	validRoutes := make([]*Route, 0, len(shortestPaths))
-	sourceVertex := newVertex(r.selfNode.PubKey)
+	sourceVertex := NewVertex(r.selfNode.PubKey)
 	for _, path := range shortestPaths {
 		// Attempt to make the path into a route. We snip off the first
 		// hop in the path as it contains a "self-hop" that is inserted
@@ -1266,7 +1331,7 @@ type LightningPayment struct {
 	// FinalCLTVDelta is the CTLV expiry delta to use for the _final_ hop
 	// in the route. This means that the final hop will have a CLTV delta
 	// of at least: currentHeight + FinalCLTVDelta. If this value is
-	// unspcified, then a default value of DefaultFinalCLTVDelta will be
+	// unspecified, then a default value of DefaultFinalCLTVDelta will be
 	// used.
 	FinalCLTVDelta *uint16
 
@@ -1675,7 +1740,7 @@ func (r *ChannelRouter) ForEachNode(cb func(*channeldb.LightningNode) error) err
 	})
 }
 
-// ForAllOutgoingChannels is used to iterate over all outgiong channel owned by
+// ForAllOutgoingChannels is used to iterate over all outgoing channels owned by
 // the router.
 //
 // NOTE: This method is part of the ChannelGraphSource interface.

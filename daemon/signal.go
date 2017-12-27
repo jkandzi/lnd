@@ -1,7 +1,5 @@
 package daemon
 
-// Heavily inspired by https://github.com/btcsuite/btcd/blob/master/signal.go
-
 import (
 	"os"
 	"os/signal"

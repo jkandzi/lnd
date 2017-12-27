@@ -228,10 +228,10 @@ func (b *breachArbiter) Start() error {
 		// to be managed by the contractObserver.
 		chanPoint := chanState.FundingOutpoint
 		if closeSummary, ok := closeSummaries[chanPoint]; ok {
-			// Since this channel should not be open, we immediately
-			// notify the HTLC switch that this link should be
-			// closed, and that all activity on the link should
-			// cease.
+			// Since this channel should not be open, we
+			// immediately notify the HTLC switch that this link
+			// should be closed, and that all activity on the link
+			// should cease.
 			b.cfg.CloseLink(&chanState.FundingOutpoint,
 				htlcswitch.CloseBreach)
 
@@ -649,6 +649,7 @@ func (b *breachArbiter) breachObserver(contract *lnwallet.LightningChannel,
 	// A read from this channel indicates that the contract has been
 	// settled cooperatively so we exit as our duties are no longer needed.
 	case <-settleSignal:
+		contract.CancelObserver()
 		contract.Stop()
 		return
 
@@ -666,6 +667,10 @@ func (b *breachArbiter) breachObserver(contract *lnwallet.LightningChannel,
 			case <-b.quit:
 			}
 		}()
+
+		b.cfg.CloseLink(chanPoint, htlcswitch.CloseBreach)
+		contract.CancelObserver()
+		contract.Stop()
 
 		// Next, we'll launch a goroutine to wait until the closing
 		// transaction has been confirmed so we can mark the contract
@@ -1086,7 +1091,7 @@ func (b *breachArbiter) createJusticeTx(
 // craftCommitmentSweepTx creates a transaction to sweep the non-delayed output
 // within the commitment transaction that pays to us. We must manually sweep
 // this output as it uses a tweaked public key in its pkScript, so the wallet
-// won't immediacy be aware of it.
+// won't immediately be aware of it.
 //
 // TODO(roasbeef): alternative options
 //  * leave the output in the chain, use as input to future funding tx
@@ -1132,8 +1137,13 @@ func (b *breachArbiter) sweepSpendableOutputsTxn(txWeight uint64,
 		totalAmt += input.Amount()
 	}
 
-	feePerWeight := b.cfg.Estimator.EstimateFeePerWeight(1)
-	txFee := btcutil.Amount(txWeight * feePerWeight)
+	// We'll actually attempt to target inclusion within the next two
+	// blocks as we'd like to sweep these funds back into our wallet ASAP.
+	feePerWeight, err := b.cfg.Estimator.EstimateFeePerWeight(2)
+	if err != nil {
+		return nil, err
+	}
+	txFee := btcutil.Amount(txWeight * uint64(feePerWeight))
 
 	sweepAmt := int64(totalAmt - txFee)
 
@@ -1212,7 +1222,7 @@ func (b *breachArbiter) sweepSpendableOutputsTxn(txWeight uint64,
 type RetributionStore interface {
 	// Add persists the retributionInfo to disk, using the information's
 	// chanPoint as the key. This method should overwrite any existing
-	// entires found under the same key, and an error should be raised if
+	// entries found under the same key, and an error should be raised if
 	// the addition fails.
 	Add(retInfo *retributionInfo) error
 

@@ -62,6 +62,14 @@ func (c *testCtx) RestartRouter() error {
 	return nil
 }
 
+func copyPubKey(pub *btcec.PublicKey) *btcec.PublicKey {
+	return &btcec.PublicKey{
+		Curve: btcec.S256(),
+		X:     pub.X,
+		Y:     pub.Y,
+	}
+}
+
 func createTestCtx(startingHeight uint32, testGraph ...string) (*testCtx, func(), error) {
 	var (
 		graph      *channeldb.ChannelGraph
@@ -167,8 +175,19 @@ func TestFindRoutesFeeSorting(t *testing.T) {
 
 	// Exactly, two such paths should be found.
 	if len(routes) != 2 {
-		t.Fatalf("2 routes shouldn't been selected, instead %v were: %v",
+		t.Fatalf("2 routes should've been selected, instead %v were: %v",
 			len(routes), spew.Sdump(routes))
+	}
+
+	// We shouldn't pay a fee for the fist route, but the second route
+	// should have a fee intact.
+	if routes[0].TotalFees != 0 {
+		t.Fatalf("incorrect fees for first route, expected 0 got: %v",
+			routes[0].TotalFees)
+	}
+	if routes[1].TotalFees == 0 {
+		t.Fatalf("total fees not set in second route: %v",
+			spew.Sdump(routes[0]))
 	}
 
 	// The paths should properly be ranked according to their total fee
@@ -439,10 +458,10 @@ func TestAddProof(t *testing.T) {
 	// After utxo was recreated adding the edge without the proof.
 	edge := &channeldb.ChannelEdgeInfo{
 		ChannelID:   chanID.ToUint64(),
-		NodeKey1:    node1.PubKey,
-		NodeKey2:    node2.PubKey,
-		BitcoinKey1: bitcoinKey1,
-		BitcoinKey2: bitcoinKey2,
+		NodeKey1:    copyPubKey(node1.PubKey),
+		NodeKey2:    copyPubKey(node2.PubKey),
+		BitcoinKey1: copyPubKey(bitcoinKey1),
+		BitcoinKey2: copyPubKey(bitcoinKey2),
 		AuthProof:   nil,
 	}
 
@@ -480,7 +499,7 @@ func TestIgnoreNodeAnnouncement(t *testing.T) {
 		HaveNodeAnnouncement: true,
 		LastUpdate:           time.Unix(123, 0),
 		Addresses:            testAddrs,
-		PubKey:               priv1.PubKey(),
+		PubKey:               copyPubKey(priv1.PubKey()),
 		Color:                color.RGBA{1, 2, 3, 0},
 		Alias:                "node11",
 		AuthSig:              testSig,
@@ -540,10 +559,10 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 
 	edge := &channeldb.ChannelEdgeInfo{
 		ChannelID:   chanID.ToUint64(),
-		NodeKey1:    priv1.PubKey(),
-		NodeKey2:    priv2.PubKey(),
-		BitcoinKey1: bitcoinKey1,
-		BitcoinKey2: bitcoinKey2,
+		NodeKey1:    copyPubKey(priv1.PubKey()),
+		NodeKey2:    copyPubKey(priv2.PubKey()),
+		BitcoinKey1: copyPubKey(bitcoinKey1),
+		BitcoinKey2: copyPubKey(bitcoinKey2),
 		AuthProof:   nil,
 	}
 	if err := ctx.router.AddEdge(edge); err != nil {
@@ -697,7 +716,7 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 		HaveNodeAnnouncement: true,
 		LastUpdate:           time.Unix(123, 0),
 		Addresses:            testAddrs,
-		PubKey:               priv1.PubKey(),
+		PubKey:               copyPubKey(priv1.PubKey()),
 		Color:                color.RGBA{1, 2, 3, 0},
 		Alias:                "node11",
 		AuthSig:              testSig,
@@ -712,7 +731,7 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 		HaveNodeAnnouncement: true,
 		LastUpdate:           time.Unix(123, 0),
 		Addresses:            testAddrs,
-		PubKey:               priv2.PubKey(),
+		PubKey:               copyPubKey(priv2.PubKey()),
 		Color:                color.RGBA{1, 2, 3, 0},
 		Alias:                "node22",
 		AuthSig:              testSig,
@@ -847,10 +866,10 @@ func TestWakeUpOnStaleBranch(t *testing.T) {
 
 	edge1 := &channeldb.ChannelEdgeInfo{
 		ChannelID:   chanID1,
-		NodeKey1:    node1.PubKey,
-		NodeKey2:    node2.PubKey,
-		BitcoinKey1: bitcoinKey1,
-		BitcoinKey2: bitcoinKey2,
+		NodeKey1:    copyPubKey(node1.PubKey),
+		NodeKey2:    copyPubKey(node2.PubKey),
+		BitcoinKey1: copyPubKey(bitcoinKey1),
+		BitcoinKey2: copyPubKey(bitcoinKey2),
 		AuthProof: &channeldb.ChannelAuthProof{
 			NodeSig1:    testSig,
 			NodeSig2:    testSig,
@@ -865,10 +884,10 @@ func TestWakeUpOnStaleBranch(t *testing.T) {
 
 	edge2 := &channeldb.ChannelEdgeInfo{
 		ChannelID:   chanID2,
-		NodeKey1:    node1.PubKey,
-		NodeKey2:    node2.PubKey,
-		BitcoinKey1: bitcoinKey1,
-		BitcoinKey2: bitcoinKey2,
+		NodeKey1:    copyPubKey(node1.PubKey),
+		NodeKey2:    copyPubKey(node2.PubKey),
+		BitcoinKey1: copyPubKey(bitcoinKey1),
+		BitcoinKey2: copyPubKey(bitcoinKey2),
 		AuthProof: &channeldb.ChannelAuthProof{
 			NodeSig1:    testSig,
 			NodeSig2:    testSig,
@@ -1049,10 +1068,10 @@ func TestDisconnectedBlocks(t *testing.T) {
 
 	edge1 := &channeldb.ChannelEdgeInfo{
 		ChannelID:   chanID1,
-		NodeKey1:    node1.PubKey,
-		NodeKey2:    node2.PubKey,
-		BitcoinKey1: bitcoinKey1,
-		BitcoinKey2: bitcoinKey2,
+		NodeKey1:    copyPubKey(node1.PubKey),
+		NodeKey2:    copyPubKey(node2.PubKey),
+		BitcoinKey1: copyPubKey(bitcoinKey1),
+		BitcoinKey2: copyPubKey(bitcoinKey2),
 		AuthProof: &channeldb.ChannelAuthProof{
 			NodeSig1:    testSig,
 			NodeSig2:    testSig,
@@ -1067,10 +1086,10 @@ func TestDisconnectedBlocks(t *testing.T) {
 
 	edge2 := &channeldb.ChannelEdgeInfo{
 		ChannelID:   chanID2,
-		NodeKey1:    node1.PubKey,
-		NodeKey2:    node2.PubKey,
-		BitcoinKey1: bitcoinKey1,
-		BitcoinKey2: bitcoinKey2,
+		NodeKey1:    copyPubKey(node1.PubKey),
+		NodeKey2:    copyPubKey(node2.PubKey),
+		BitcoinKey1: copyPubKey(bitcoinKey1),
+		BitcoinKey2: copyPubKey(bitcoinKey2),
 		AuthProof: &channeldb.ChannelAuthProof{
 			NodeSig1:    testSig,
 			NodeSig2:    testSig,
@@ -1189,10 +1208,10 @@ func TestRouterChansClosedOfflinePruneGraph(t *testing.T) {
 	}
 	edge1 := &channeldb.ChannelEdgeInfo{
 		ChannelID:   chanID1.ToUint64(),
-		NodeKey1:    node1.PubKey,
-		NodeKey2:    node2.PubKey,
-		BitcoinKey1: bitcoinKey1,
-		BitcoinKey2: bitcoinKey2,
+		NodeKey1:    copyPubKey(node1.PubKey),
+		NodeKey2:    copyPubKey(node2.PubKey),
+		BitcoinKey1: copyPubKey(bitcoinKey1),
+		BitcoinKey2: copyPubKey(bitcoinKey2),
 		AuthProof: &channeldb.ChannelAuthProof{
 			NodeSig1:    testSig,
 			NodeSig2:    testSig,

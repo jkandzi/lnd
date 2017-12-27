@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"image/color"
 	"io"
 	"math"
 
@@ -16,7 +17,7 @@ import (
 	"github.com/roasbeef/btcutil"
 )
 
-// MaxSliceLength is the maximum allowed lenth for any opaque byte slices in
+// MaxSliceLength is the maximum allowed length for any opaque byte slices in
 // the wire protocol.
 const MaxSliceLength = 65535
 
@@ -95,6 +96,12 @@ func writeElement(w io.Writer, element interface{}) error {
 	case uint16:
 		var b [2]byte
 		binary.BigEndian.PutUint16(b[:], e)
+		if _, err := w.Write(b[:]); err != nil {
+			return err
+		}
+	case ChanUpdateFlag:
+		var b [2]byte
+		binary.BigEndian.PutUint16(b[:], uint16(e))
 		if _, err := w.Write(b[:]); err != nil {
 			return err
 		}
@@ -349,8 +356,8 @@ func writeElement(w io.Writer, element interface{}) error {
 				return err
 			}
 		}
-	case RGB:
-		if err := writeElements(w, e.red, e.green, e.blue); err != nil {
+	case color.RGBA:
+		if err := writeElements(w, e.R, e.G, e.B); err != nil {
 			return err
 		}
 
@@ -406,6 +413,12 @@ func readElement(r io.Reader, element interface{}) error {
 			return err
 		}
 		*e = binary.BigEndian.Uint16(b[:])
+	case *ChanUpdateFlag:
+		var b [2]byte
+		if _, err := io.ReadFull(r, b[:]); err != nil {
+			return err
+		}
+		*e = ChanUpdateFlag(binary.BigEndian.Uint16(b[:]))
 	case *ErrorCode:
 		var b [2]byte
 		if _, err := io.ReadFull(r, b[:]); err != nil {
@@ -677,11 +690,11 @@ func readElement(r io.Reader, element interface{}) error {
 		}
 
 		*e = addresses
-	case *RGB:
+	case *color.RGBA:
 		err := readElements(r,
-			&e.red,
-			&e.green,
-			&e.blue,
+			&e.R,
+			&e.G,
+			&e.B,
 		)
 		if err != nil {
 			return err

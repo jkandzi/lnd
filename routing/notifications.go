@@ -51,7 +51,7 @@ type topologyClientUpdate struct {
 }
 
 // SubscribeTopology returns a new topology client which can be used by the
-// caller to receive notifications when ever a change in the channel graph
+// caller to receive notifications whenever a change in the channel graph
 // topology occurs. Changes that will be sent at notifications include: new
 // nodes appearing, node updating their attributes, new channels, channels
 // closing, and updates in the routing policies of a channel's directed edges.
@@ -110,15 +110,19 @@ type topologyClient struct {
 // notifyTopologyChange notifies all registered clients of a new change in
 // graph topology in a non-blocking.
 func (r *ChannelRouter) notifyTopologyChange(topologyDiff *TopologyChange) {
-	if len(r.topologyClients) != 0 {
+	r.RLock()
+	numClients := len(r.topologyClients)
+	r.RUnlock()
+	if numClients != 0 {
 		log.Tracef("Sending topology notification to %v clients %v",
-			len(r.topologyClients),
+			numClients,
 			newLogClosure(func() string {
 				return spew.Sdump(topologyDiff)
 			}),
 		)
 	}
 
+	r.RLock()
 	for _, client := range r.topologyClients {
 		client.wg.Add(1)
 
@@ -142,6 +146,7 @@ func (r *ChannelRouter) notifyTopologyChange(topologyDiff *TopologyChange) {
 			}
 		}(client)
 	}
+	r.RUnlock()
 }
 
 // TopologyChange represents a new set of modifications to the channel graph.
@@ -322,7 +327,7 @@ func addToTopologyChange(graph *channeldb.ChannelGraph, update *TopologyChange,
 		// the second node.
 		sourceNode := edgeInfo.NodeKey1
 		connectingNode := edgeInfo.NodeKey2
-		if m.Flags == 1 {
+		if m.Flags&lnwire.ChanUpdateDirection == 1 {
 			sourceNode = edgeInfo.NodeKey2
 			connectingNode = edgeInfo.NodeKey1
 		}

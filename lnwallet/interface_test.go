@@ -8,11 +8,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/boltdb/bolt"
+	"github.com/davecgh/go-spew/spew"
 
 	"github.com/roasbeef/btcwallet/chain"
 
@@ -257,11 +260,14 @@ func testDualFundingReservationWorkflow(miner *rpctest.Harness,
 
 	// Alice initiates a channel funded with 5 BTC for each side, so 10 BTC
 	// total. She also generates 2 BTC in change.
-	feePerWeight := btcutil.Amount(alice.Cfg.FeeEstimator.EstimateFeePerWeight(1))
+	feePerWeight, err := alice.Cfg.FeeEstimator.EstimateFeePerWeight(1)
+	if err != nil {
+		t.Fatalf("unable to query fee estimator: %v", err)
+	}
 	feePerKw := feePerWeight * 1000
 	aliceChanReservation, err := alice.InitChannelReservation(
-		fundingAmount*2, fundingAmount, 0, feePerKw,
-		bobPub, bobAddr, chainHash)
+		fundingAmount*2, fundingAmount, 0, feePerKw, feePerKw,
+		bobPub, bobAddr, chainHash, lnwire.FFAnnounceChannel)
 	if err != nil {
 		t.Fatalf("unable to initialize funding reservation: %v", err)
 	}
@@ -284,8 +290,8 @@ func testDualFundingReservationWorkflow(miner *rpctest.Harness,
 	// receives' Alice's contribution, and consumes that so we can continue
 	// the funding process.
 	bobChanReservation, err := bob.InitChannelReservation(fundingAmount*2,
-		fundingAmount, 0, feePerKw, alicePub, aliceAddr,
-		chainHash)
+		fundingAmount, 0, feePerKw, feePerKw, alicePub, aliceAddr,
+		chainHash, lnwire.FFAnnounceChannel)
 	if err != nil {
 		t.Fatalf("bob unable to init channel reservation: %v", err)
 	}
@@ -403,10 +409,15 @@ func testFundingTransactionLockedOutputs(miner *rpctest.Harness,
 
 	// Create a single channel asking for 16 BTC total.
 	fundingAmount := btcutil.Amount(8 * 1e8)
-	feePerWeight := btcutil.Amount(alice.Cfg.FeeEstimator.EstimateFeePerWeight(1))
+	feePerWeight, err := alice.Cfg.FeeEstimator.EstimateFeePerWeight(1)
+	if err != nil {
+		t.Fatalf("unable to query fee estimator: %v", err)
+	}
 	feePerKw := feePerWeight * 1000
-	_, err := alice.InitChannelReservation(fundingAmount,
-		fundingAmount, 0, feePerKw, bobPub, bobAddr, chainHash)
+	_, err = alice.InitChannelReservation(fundingAmount,
+		fundingAmount, 0, feePerKw, feePerKw, bobPub, bobAddr, chainHash,
+		lnwire.FFAnnounceChannel,
+	)
 	if err != nil {
 		t.Fatalf("unable to initialize funding reservation 1: %v", err)
 	}
@@ -416,7 +427,7 @@ func testFundingTransactionLockedOutputs(miner *rpctest.Harness,
 	// that aren't locked, so this should fail.
 	amt := btcutil.Amount(900 * 1e8)
 	failedReservation, err := alice.InitChannelReservation(amt, amt, 0,
-		feePerKw, bobPub, bobAddr, chainHash)
+		feePerKw, feePerKw, bobPub, bobAddr, chainHash, lnwire.FFAnnounceChannel)
 	if err == nil {
 		t.Fatalf("not error returned, should fail on coin selection")
 	}
@@ -431,20 +442,26 @@ func testFundingTransactionLockedOutputs(miner *rpctest.Harness,
 func testFundingCancellationNotEnoughFunds(miner *rpctest.Harness,
 	alice, _ *lnwallet.LightningWallet, t *testing.T) {
 
-	feePerWeight := btcutil.Amount(alice.Cfg.FeeEstimator.EstimateFeePerWeight(1))
+	feePerWeight, err := alice.Cfg.FeeEstimator.EstimateFeePerWeight(1)
+	if err != nil {
+		t.Fatalf("unable to query fee estimator: %v", err)
+	}
 	feePerKw := feePerWeight * 1000
 
 	// Create a reservation for 44 BTC.
 	fundingAmount := btcutil.Amount(44 * 1e8)
 	chanReservation, err := alice.InitChannelReservation(fundingAmount,
-		fundingAmount, 0, feePerKw, bobPub, bobAddr, chainHash)
+		fundingAmount, 0, feePerKw, feePerKw, bobPub, bobAddr, chainHash,
+		lnwire.FFAnnounceChannel)
 	if err != nil {
 		t.Fatalf("unable to initialize funding reservation: %v", err)
 	}
 
 	// Attempt to create another channel with 44 BTC, this should fail.
 	_, err = alice.InitChannelReservation(fundingAmount,
-		fundingAmount, 0, feePerKw, bobPub, bobAddr, chainHash)
+		fundingAmount, 0, feePerKw, feePerKw, bobPub, bobAddr, chainHash,
+		lnwire.FFAnnounceChannel,
+	)
 	if _, ok := err.(*lnwallet.ErrInsufficientFunds); !ok {
 		t.Fatalf("coin selection succeded should have insufficient funds: %v",
 			err)
@@ -474,7 +491,7 @@ func testFundingCancellationNotEnoughFunds(miner *rpctest.Harness,
 
 	// Request to fund a new channel should now succeed.
 	_, err = alice.InitChannelReservation(fundingAmount, fundingAmount, 0,
-		feePerKw, bobPub, bobAddr, chainHash)
+		feePerKw, feePerKw, bobPub, bobAddr, chainHash, lnwire.FFAnnounceChannel)
 	if err != nil {
 		t.Fatalf("unable to initialize funding reservation: %v", err)
 	}
@@ -483,16 +500,45 @@ func testFundingCancellationNotEnoughFunds(miner *rpctest.Harness,
 func testCancelNonExistantReservation(miner *rpctest.Harness,
 	alice, _ *lnwallet.LightningWallet, t *testing.T) {
 
-	feeRate := btcutil.Amount(alice.Cfg.FeeEstimator.EstimateFeePerWeight(1))
+	feeRate, err := alice.Cfg.FeeEstimator.EstimateFeePerWeight(1)
+	if err != nil {
+		t.Fatalf("unable to query fee estimator: %v", err)
+	}
 
 	// Create our own reservation, give it some ID.
-	res := lnwallet.NewChannelReservation(1000, 1000, feeRate, alice,
-		22, 10, &testHdSeed)
+	res, err := lnwallet.NewChannelReservation(
+		1000, 1000, feeRate, alice, 22, 10, &testHdSeed, lnwire.FFAnnounceChannel,
+	)
+	if err != nil {
+		t.Fatalf("unable to create res: %v", err)
+	}
 
 	// Attempt to cancel this reservation. This should fail, we know
 	// nothing of it.
 	if err := res.Cancel(); err == nil {
 		t.Fatalf("cancelled non-existent reservation")
+	}
+}
+
+func testReservationInitiatorBalanceBelowDustCancel(miner *rpctest.Harness,
+	alice, _ *lnwallet.LightningWallet, t *testing.T) {
+
+	// We'll attempt to create a new reservation with an extremely high fee
+	// rate. This should push our balance into the negative and result in a
+	// failure to create the reservation.
+	fundingAmount := btcutil.Amount(4 * 1e8)
+	feePerKw := btcutil.Amount(btcutil.SatoshiPerBitcoin * 10)
+	_, err := alice.InitChannelReservation(
+		fundingAmount, fundingAmount, 0, feePerKw, feePerKw, bobPub,
+		bobAddr, chainHash, lnwire.FFAnnounceChannel,
+	)
+	switch {
+	case err == nil:
+		t.Fatalf("initialization should've failed due to " +
+			"insufficient local amount")
+
+	case !strings.Contains(err.Error(), "local output is too small"):
+		t.Fatalf("incorrect error: %v", err)
 	}
 }
 
@@ -550,10 +596,14 @@ func testSingleFunderReservationWorkflow(miner *rpctest.Harness,
 	// towards Bob's side.
 	fundingAmt := btcutil.Amount(4 * 1e8)
 	pushAmt := lnwire.NewMSatFromSatoshis(btcutil.SatoshiPerBitcoin)
-	feePerWeight := btcutil.Amount(alice.Cfg.FeeEstimator.EstimateFeePerWeight(1))
+	feePerWeight, err := alice.Cfg.FeeEstimator.EstimateFeePerWeight(1)
+	if err != nil {
+		t.Fatalf("unable to query fee estimator: %v", err)
+	}
 	feePerKw := feePerWeight * 1000
 	aliceChanReservation, err := alice.InitChannelReservation(fundingAmt,
-		fundingAmt, pushAmt, feePerKw, bobPub, bobAddr, chainHash)
+		fundingAmt, pushAmt, feePerKw, feePerKw, bobPub, bobAddr, chainHash,
+		lnwire.FFAnnounceChannel)
 	if err != nil {
 		t.Fatalf("unable to init channel reservation: %v", err)
 	}
@@ -577,7 +627,8 @@ func testSingleFunderReservationWorkflow(miner *rpctest.Harness,
 	// Next, Bob receives the initial request, generates a corresponding
 	// reservation initiation, then consume Alice's contribution.
 	bobChanReservation, err := bob.InitChannelReservation(fundingAmt, 0,
-		pushAmt, feePerKw, alicePub, aliceAddr, chainHash)
+		pushAmt, feePerKw, feePerKw, alicePub, aliceAddr, chainHash,
+		lnwire.FFAnnounceChannel)
 	if err != nil {
 		t.Fatalf("unable to create bob reservation: %v", err)
 	}
@@ -771,6 +822,10 @@ func testListTransactionDetails(miner *rpctest.Harness,
 		t.Fatalf("unable to fetch tx details: %v", err)
 	}
 
+	// This is a mapping from:
+	// blockHash -> transactionHash -> transactionOutputs
+	blockTxOuts := make(map[chainhash.Hash]map[chainhash.Hash][]*wire.TxOut)
+
 	// Each of the transactions created above should be found with the
 	// proper details populated.
 	for _, txDetail := range txDetails {
@@ -786,9 +841,49 @@ func testListTransactionDetails(miner *rpctest.Harness,
 			t.Fatalf("tx value incorrect, got %v expected %v",
 				txDetail.Value, outputAmt)
 		}
+
 		if !bytes.Equal(txDetail.BlockHash[:], blocks[0][:]) {
 			t.Fatalf("block hash mismatch, got %v expected %v",
 				txDetail.BlockHash, blocks[0])
+		}
+
+		// This fetches the transactions in a block so that we can compare the
+		// txouts stored in the mined transaction against the ones in the transaction
+		// details
+		if _, ok := blockTxOuts[*txDetail.BlockHash]; !ok {
+			fetchedBlock, err := alice.Cfg.ChainIO.GetBlock(txDetail.BlockHash)
+			if err != nil {
+				t.Fatalf("err fetching block: %s", err)
+			}
+
+			transactions :=
+				make(map[chainhash.Hash][]*wire.TxOut, len(fetchedBlock.Transactions))
+			for _, tx := range fetchedBlock.Transactions {
+				transactions[tx.TxHash()] = tx.TxOut
+			}
+
+			blockTxOuts[fetchedBlock.BlockHash()] = transactions
+		}
+
+		if txOuts, ok := blockTxOuts[*txDetail.BlockHash][txDetail.Hash]; !ok {
+			t.Fatalf("tx (%v) not found in block (%v)",
+				txDetail.Hash, txDetail.BlockHash)
+		} else {
+			var destinationAddresses []btcutil.Address
+
+			for _, txOut := range txOuts {
+				_, addrs, _, err :=
+					txscript.ExtractPkScriptAddrs(txOut.PkScript, &alice.Cfg.NetParams)
+				if err != nil {
+					t.Fatalf("err extract script addresses: %s", err)
+				}
+				destinationAddresses = append(destinationAddresses, addrs...)
+			}
+
+			if !reflect.DeepEqual(txDetail.DestAddresses, destinationAddresses) {
+				t.Fatalf("destination addresses mismatch, got %v expected %v",
+					txDetail.DestAddresses, destinationAddresses)
+			}
 		}
 
 		delete(txids, txDetail.Hash)
@@ -806,7 +901,7 @@ func testListTransactionDetails(miner *rpctest.Harness,
 		t.Fatalf("unable to make output script: %v", err)
 	}
 	burnOutput := wire.NewTxOut(outputAmt, outputScript)
-	burnTXID, err := alice.SendOutputs([]*wire.TxOut{burnOutput})
+	burnTXID, err := alice.SendOutputs([]*wire.TxOut{burnOutput}, 10)
 	if err != nil {
 		t.Fatalf("unable to create burn tx: %v", err)
 	}
@@ -833,9 +928,14 @@ func testListTransactionDetails(miner *rpctest.Harness,
 			t.Fatalf("num confs incorrect, got %v expected %v",
 				txDetail.NumConfirmations, 1)
 		}
+
+		// We assert that the value is greater than the amount we
+		// attempted to send, as the wallet should've paid some amount
+		// of network fees.
 		if txDetail.Value >= -outputAmt {
+			fmt.Println(spew.Sdump(txDetail))
 			t.Fatalf("tx value incorrect, got %v expected %v",
-				txDetail.Value, -outputAmt)
+				int64(txDetail.Value), -int64(outputAmt))
 		}
 		if !bytes.Equal(txDetail.BlockHash[:], burnBlock[0][:]) {
 			t.Fatalf("block hash mismatch, got %v expected %v",
@@ -1003,7 +1103,7 @@ func testSignOutputUsingTweaks(r *rpctest.Harness,
 			Value:    btcutil.SatoshiPerBitcoin,
 			PkScript: keyScript,
 		}
-		txid, err := alice.SendOutputs([]*wire.TxOut{newOutput})
+		txid, err := alice.SendOutputs([]*wire.TxOut{newOutput}, 10)
 		if err != nil {
 			t.Fatalf("unable to create output: %v", err)
 		}
@@ -1122,7 +1222,7 @@ func testReorgWalletBalance(r *rpctest.Harness, w *lnwallet.LightningWallet,
 		Value:    1e8,
 		PkScript: script,
 	}
-	if _, err = w.SendOutputs([]*wire.TxOut{output}); err != nil {
+	if _, err = w.SendOutputs([]*wire.TxOut{output}, 10); err != nil {
 		t.Fatalf("unable to send outputs: %v", err)
 	}
 	_, err = r.Node.Generate(50)
@@ -1252,6 +1352,10 @@ type walletTestCase struct {
 }
 
 var walletTests = []walletTestCase{
+	{
+		name: "insane fee reject",
+		test: testReservationInitiatorBalanceBelowDustCancel,
+	},
 	{
 		name: "single funding workflow",
 		test: testSingleFunderReservationWorkflow,

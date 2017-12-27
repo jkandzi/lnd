@@ -1,6 +1,9 @@
-package lnwire
-
+// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2015-2016 The Decred developers
 // code derived from https://github .com/btcsuite/btcd/blob/master/wire/message.go
+// Copyright (C) 2015-2017 The Lightning Network Developers
+
+package lnwire
 
 import (
 	"bytes"
@@ -32,16 +35,16 @@ const (
 	MsgFundingCreated                      = 34
 	MsgFundingSigned                       = 35
 	MsgFundingLocked                       = 36
-	MsgShutdown                            = 39
-	MsgClosingSigned                       = 40
+	MsgShutdown                            = 38
+	MsgClosingSigned                       = 39
 	MsgUpdateAddHTLC                       = 128
 	MsgUpdateFufillHTLC                    = 130
 	MsgUpdateFailHTLC                      = 131
 	MsgCommitSig                           = 132
 	MsgRevokeAndAck                        = 133
+	MsgUpdateFee                           = 134
 	MsgUpdateFailMalformedHTLC             = 135
 	MsgChannelReestablish                  = 136
-	MsgUpdateFee                           = 137
 	MsgChannelAnnouncement                 = 256
 	MsgNodeAnnouncement                    = 257
 	MsgChannelUpdate                       = 258

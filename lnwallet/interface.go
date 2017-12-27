@@ -12,7 +12,7 @@ import (
 )
 
 // ErrNotMine is an error denoting that a WalletController instance is unable
-// to spend a specifid output.
+// to spend a specified output.
 var ErrNotMine = errors.New("the passed output doesn't belong to the wallet")
 
 // AddressType is a enum-like type which denotes the possible address types
@@ -79,6 +79,9 @@ type TransactionDetail struct {
 
 	// TotalFees is the total fee in satoshis paid by this transaction.
 	TotalFees int64
+
+	// DestAddresses are the destinations for a transaction
+	DestAddresses []btcutil.Address
 }
 
 // TransactionSubscription is an interface which describes an object capable of
@@ -129,7 +132,7 @@ type WalletController interface {
 	// p2wkh, p2wsh, etc.
 	NewAddress(addrType AddressType, change bool) (btcutil.Address, error)
 
-	// GetPrivKey retrives the underlying private key associated with the
+	// GetPrivKey retrieves the underlying private key associated with the
 	// passed address. If the wallet is unable to locate this private key
 	// due to the address not being under control of the wallet, then an
 	// error should be returned.
@@ -151,9 +154,11 @@ type WalletController interface {
 
 	// SendOutputs funds, signs, and broadcasts a Bitcoin transaction
 	// paying out to the specified outputs. In the case the wallet has
-	// insufficient funds, or the outputs are non-standard, an error
-	// should be returned.
-	SendOutputs(outputs []*wire.TxOut) (*chainhash.Hash, error)
+	// insufficient funds, or the outputs are non-standard, an error should
+	// be returned. This method also takes the target fee expressed in
+	// sat/byte that should be used when crafting the transaction.
+	SendOutputs(outputs []*wire.TxOut,
+		feeSatPerByte btcutil.Amount) (*chainhash.Hash, error)
 
 	// ListUnspentWitness returns all unspent outputs which are version 0
 	// witness programs. The 'confirms' parameter indicates the minimum
@@ -268,38 +273,18 @@ type MessageSigner interface {
 	SignMessage(pubKey *btcec.PublicKey, msg []byte) (*btcec.Signature, error)
 }
 
-// FeeEstimator provides the ability to estimate on-chain transaction fees for
-// various combinations of transaction sizes and desired confirmation time
-// (measured by number of blocks).
-type FeeEstimator interface {
-	// EstimateFeePerByte takes in a target for the number of blocks until
-	// an initial confirmation and returns the estimated fee expressed in
-	// satoshis/byte.
-	EstimateFeePerByte(numBlocks uint32) uint64
-
-	// EstimateFeePerWeight takes in a target for the number of blocks until
-	// an initial confirmation and returns the estimated fee expressed in
-	// satoshis/weight.
-	EstimateFeePerWeight(numBlocks uint32) uint64
-
-	// EstimateConfirmation will return the number of blocks expected for a
-	// transaction to be confirmed given a fee rate in satoshis per
-	// byte.
-	EstimateConfirmation(satPerByte int64) uint32
-}
-
 // WalletDriver represents a "driver" for a particular concrete
 // WalletController implementation. A driver is identified by a globally unique
 // string identifier along with a 'New()' method which is responsible for
 // initializing a particular WalletController concrete implementation.
 type WalletDriver struct {
-	// WalletType is a string which uniquely identifes the WalletController
+	// WalletType is a string which uniquely identifies the WalletController
 	// that this driver, drives.
 	WalletType string
 
 	// New creates a new instance of a concrete WalletController
 	// implementation given a variadic set up arguments. The function takes
-	// a varidaic number of interface parameters in order to provide
+	// a variadic number of interface parameters in order to provide
 	// initialization flexibility, thereby accommodating several potential
 	// WalletController implementations.
 	New func(args ...interface{}) (WalletController, error)

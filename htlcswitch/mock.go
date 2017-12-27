@@ -22,7 +22,43 @@ import (
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
+	"github.com/roasbeef/btcutil"
 )
+
+type mockFeeEstimator struct {
+	byteFeeIn   chan btcutil.Amount
+	weightFeeIn chan btcutil.Amount
+
+	quit chan struct{}
+}
+
+func (m *mockFeeEstimator) EstimateFeePerByte(numBlocks uint32) (btcutil.Amount, error) {
+	select {
+	case feeRate := <-m.byteFeeIn:
+		return feeRate, nil
+	case <-m.quit:
+		return 0, fmt.Errorf("exiting")
+	}
+}
+
+func (m *mockFeeEstimator) EstimateFeePerWeight(numBlocks uint32) (btcutil.Amount, error) {
+	select {
+	case feeRate := <-m.weightFeeIn:
+		return feeRate, nil
+	case <-m.quit:
+		return 0, fmt.Errorf("exiting")
+	}
+}
+
+func (m *mockFeeEstimator) Start() error {
+	return nil
+}
+func (m *mockFeeEstimator) Stop() error {
+	close(m.quit)
+	return nil
+}
+
+var _ lnwallet.FeeEstimator = (*mockFeeEstimator)(nil)
 
 type mockServer struct {
 	started  int32
@@ -304,6 +340,8 @@ func (s *mockServer) readHandler(message lnwire.Message) error {
 		return nil
 	case *lnwire.ChannelReestablish:
 		targetChan = msg.ChanID
+	case *lnwire.UpdateFee:
+		targetChan = msg.ChanID
 	default:
 		return fmt.Errorf("unknown message type: %T", msg)
 	}
@@ -332,7 +370,7 @@ func (s *mockServer) Disconnect(reason error) {
 	s.t.Fatalf("server %v was disconnected: %v", s.name, reason)
 }
 
-func (s *mockServer) WipeChannel(*lnwallet.LightningChannel) error {
+func (s *mockServer) WipeChannel(*wire.OutPoint) error {
 	return nil
 }
 
@@ -352,6 +390,8 @@ func (s *mockServer) String() string {
 }
 
 type mockChannelLink struct {
+	htlcSwitch *Switch
+
 	shortChanID lnwire.ShortChannelID
 
 	chanID lnwire.ChannelID
@@ -359,20 +399,40 @@ type mockChannelLink struct {
 	peer Peer
 
 	packets chan *htlcPacket
+
+	eligible bool
+
+	htlcID uint64
 }
 
-func newMockChannelLink(chanID lnwire.ChannelID, shortChanID lnwire.ShortChannelID,
-	peer Peer) *mockChannelLink {
+func newMockChannelLink(htlcSwitch *Switch, chanID lnwire.ChannelID,
+	shortChanID lnwire.ShortChannelID, peer Peer, eligible bool,
+) *mockChannelLink {
 
 	return &mockChannelLink{
+		htlcSwitch:  htlcSwitch,
 		chanID:      chanID,
 		shortChanID: shortChanID,
 		packets:     make(chan *htlcPacket, 1),
 		peer:        peer,
+		eligible:    eligible,
 	}
 }
 
 func (f *mockChannelLink) HandleSwitchPacket(packet *htlcPacket) {
+	switch htlc := packet.htlc.(type) {
+	case *lnwire.UpdateAddHTLC:
+		f.htlcSwitch.addCircuit(&PaymentCircuit{
+			PaymentHash:    htlc.PaymentHash,
+			IncomingChanID: packet.incomingChanID,
+			IncomingHTLCID: packet.incomingHTLCID,
+			OutgoingChanID: f.shortChanID,
+			OutgoingHTLCID: f.htlcID,
+			ErrorEncrypter: packet.obfuscator,
+		})
+		f.htlcID++
+	}
+
 	f.packets <- packet
 }
 
@@ -392,6 +452,7 @@ func (f *mockChannelLink) Bandwidth() lnwire.MilliSatoshi     { return 99999999 
 func (f *mockChannelLink) Peer() Peer                         { return f.peer }
 func (f *mockChannelLink) Start() error                       { return nil }
 func (f *mockChannelLink) Stop()                              {}
+func (f *mockChannelLink) EligibleToForward() bool            { return f.eligible }
 
 var _ ChannelLink = (*mockChannelLink)(nil)
 

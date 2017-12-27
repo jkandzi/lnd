@@ -1,7 +1,5 @@
 package daemon
 
-// Heavily inspired by https://github.com/btcsuite/btcd/blob/master/version.go
-
 import (
 	"bytes"
 	"fmt"

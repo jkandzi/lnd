@@ -74,9 +74,9 @@ func TestCommitmentSpendValidation(t *testing.T) {
 	keyRing := &commitmentKeyRing{
 		delayKey:      aliceDelayKey,
 		revocationKey: revokePubKey,
-		paymentKey:    bobPayKey,
+		noDelayKey:    bobPayKey,
 	}
-	commitmentTx, err := CreateCommitTx(fakeFundingTxIn, keyRing, csvTimeout,
+	commitmentTx, err := CreateCommitTx(*fakeFundingTxIn, keyRing, csvTimeout,
 		channelBalance, channelBalance, DefaultDustLimit())
 	if err != nil {
 		t.Fatalf("unable to create commitment transaction: %v", nil)

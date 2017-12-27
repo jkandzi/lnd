@@ -20,6 +20,7 @@ import (
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
+	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
 )
 
@@ -358,14 +359,20 @@ func TestChannelLinkBidirectionalOneHopPayments(t *testing.T) {
 		}
 	}
 
+	// TODO(roasbeef): should instead consume async notifications from both
+	// links
+	time.Sleep(time.Second * 2)
+
 	// At the end Bob and Alice balances should be the same as previous,
 	// because they sent the equal amount of money to each other.
 	if aliceBandwidthBefore != n.aliceChannelLink.Bandwidth() {
-		t.Fatal("alice bandwidth shouldn't have changed")
+		t.Fatalf("alice bandwidth shouldn't have changed: expected %v, got %x",
+			aliceBandwidthBefore, n.aliceChannelLink.Bandwidth())
 	}
 
 	if bobBandwidthBefore != n.firstBobChannelLink.Bandwidth() {
-		t.Fatal("bob bandwidth shouldn't have changed")
+		t.Fatalf("bob bandwidth shouldn't have changed: expected %v, got %v",
+			bobBandwidthBefore, n.firstBobChannelLink.Bandwidth())
 	}
 
 	t.Logf("Max waiting: %v", maxDelay)
@@ -1390,7 +1397,7 @@ func (m *mockPeer) SendMessage(msg lnwire.Message) error {
 	m.Unlock()
 	return nil
 }
-func (m *mockPeer) WipeChannel(*lnwallet.LightningChannel) error {
+func (m *mockPeer) WipeChannel(*wire.OutPoint) error {
 	return nil
 }
 func (m *mockPeer) PubKey() [33]byte {
@@ -1441,7 +1448,7 @@ func newSingleLinkTestHarness(chanAmt btcutil.Amount) (ChannelLink, func(), erro
 	aliceCfg := ChannelLinkConfig{
 		FwrdingPolicy:     globalPolicy,
 		Peer:              &alicePeer,
-		Switch:            nil,
+		Switch:            New(Config{}),
 		DecodeHopIterator: decoder.DecodeHopIterator,
 		DecodeOnionObfuscator: func(io.Reader) (ErrorEncrypter, lnwire.FailCode) {
 			return obfuscator, lnwire.CodeNone
@@ -1505,10 +1512,13 @@ func TestChannelLinkBandwidthConsistency(t *testing.T) {
 	)
 
 	estimator := &lnwallet.StaticFeeEstimator{
-		FeeRate:      24,
-		Confirmation: 6,
+		FeeRate: 24,
 	}
-	feePerKw := btcutil.Amount(estimator.EstimateFeePerWeight(1) * 1000)
+	feePerWeight, err := estimator.EstimateFeePerWeight(1)
+	if err != nil {
+		t.Fatalf("unable to query fee estimator: %v", err)
+	}
+	feePerKw := feePerWeight * 1000
 	htlcFee := lnwire.NewMSatFromSatoshis(
 		btcutil.Amount((int64(feePerKw) * lnwallet.HtlcWeight) / 1000),
 	)
@@ -1530,7 +1540,7 @@ func TestChannelLinkBandwidthConsistency(t *testing.T) {
 		htlc: htlc,
 	}
 	aliceLink.HandleSwitchPacket(&addPkt)
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Millisecond * 500)
 	assertLinkBandwidth(t, aliceLink, aliceStartingBandwidth-htlcAmt-htlcFee)
 
 	// If we now send in a valid HTLC settle for the prior HTLC we added,
@@ -1541,7 +1551,7 @@ func TestChannelLinkBandwidthConsistency(t *testing.T) {
 		PaymentPreimage: invoice.Terms.PaymentPreimage,
 	}
 	aliceLink.HandleChannelUpdate(htlcSettle)
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Millisecond * 500)
 	assertLinkBandwidth(t, aliceLink, aliceStartingBandwidth-htlcAmt)
 
 	// Next, we'll add another HTLC initiated by the switch (of the same
@@ -1554,7 +1564,7 @@ func TestChannelLinkBandwidthConsistency(t *testing.T) {
 		htlc: htlc,
 	}
 	aliceLink.HandleSwitchPacket(&addPkt)
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Millisecond * 500)
 	assertLinkBandwidth(t, aliceLink, aliceStartingBandwidth-htlcAmt*2-htlcFee)
 
 	// With that processed, we'll now generate an HTLC fail (sent by the
@@ -1565,7 +1575,7 @@ func TestChannelLinkBandwidthConsistency(t *testing.T) {
 		Reason: lnwire.OpaqueReason([]byte("nop")),
 	}
 	aliceLink.HandleChannelUpdate(failMsg)
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Millisecond * 500)
 	assertLinkBandwidth(t, aliceLink, aliceStartingBandwidth-htlcAmt)
 
 	// Moving along, we'll now receive a new HTLC from the remote peer,
@@ -1573,12 +1583,13 @@ func TestChannelLinkBandwidthConsistency(t *testing.T) {
 	// remain unchanged (but Alice will need to pay the fee for the extra
 	// HTLC).
 	updateMsg := &lnwire.UpdateAddHTLC{
+		ID:          0,
 		Amount:      htlcAmt,
 		Expiry:      9,
 		PaymentHash: htlc.PaymentHash, // Re-using the same payment hash.
 	}
 	aliceLink.HandleChannelUpdate(updateMsg)
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Millisecond * 500)
 	assertLinkBandwidth(t, aliceLink, aliceStartingBandwidth-htlcAmt-htlcFee)
 
 	// Next, we'll settle the HTLC with our knowledge of the pre-image that
@@ -1591,27 +1602,27 @@ func TestChannelLinkBandwidthConsistency(t *testing.T) {
 		},
 	}
 	aliceLink.HandleSwitchPacket(&settlePkt)
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Millisecond * 500)
 	assertLinkBandwidth(t, aliceLink, aliceStartingBandwidth)
 
 	// Finally, we'll test the scenario of failing an HTLC received by the
 	// remote node. This should result in no perceived bandwidth changes.
 	htlcAdd := &lnwire.UpdateAddHTLC{
+		ID:          1,
 		Amount:      htlcAmt,
 		Expiry:      9,
 		PaymentHash: htlc.PaymentHash,
 	}
 	aliceLink.HandleChannelUpdate(htlcAdd)
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Millisecond * 500)
 	assertLinkBandwidth(t, aliceLink, aliceStartingBandwidth-htlcFee)
 	failPkt := htlcPacket{
 		htlc: &lnwire.UpdateFailHTLC{
 			ID: 3,
 		},
-		payHash: htlc.PaymentHash,
 	}
 	aliceLink.HandleSwitchPacket(&failPkt)
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Millisecond * 500)
 	assertLinkBandwidth(t, aliceLink, aliceStartingBandwidth)
 }
 
@@ -1637,21 +1648,23 @@ func TestChannelLinkBandwidthConsistencyOverflow(t *testing.T) {
 	)
 
 	estimator := &lnwallet.StaticFeeEstimator{
-		FeeRate:      24,
-		Confirmation: 6,
+		FeeRate: 24,
 	}
-	feePerKw := btcutil.Amount(estimator.EstimateFeePerWeight(1) * 1000)
+	feePerWeight, err := estimator.EstimateFeePerWeight(1)
+	if err != nil {
+		t.Fatalf("unable to query fee estimator: %v", err)
+	}
+	feePerKw := feePerWeight * 1000
 
 	addLinkHTLC := func(amt lnwire.MilliSatoshi) [32]byte {
 		invoice, htlc, err := generatePayment(amt, amt, 5, mockBlob)
 		if err != nil {
 			t.Fatalf("unable to create payment: %v", err)
 		}
-		addPkt := htlcPacket{
+		aliceLink.HandleSwitchPacket(&htlcPacket{
 			htlc:   htlc,
 			amount: amt,
-		}
-		aliceLink.HandleSwitchPacket(&addPkt)
+		})
 
 		return invoice.Terms.PaymentPreimage
 	}
@@ -1670,6 +1683,7 @@ func TestChannelLinkBandwidthConsistencyOverflow(t *testing.T) {
 		totalHtlcAmt += htlcAmt
 	}
 
+	// TODO(roasbeef): increase sleep
 	time.Sleep(time.Second * 1)
 	commitWeight := lnwallet.CommitWeight + lnwallet.HtlcWeight*numHTLCs
 	htlcFee := lnwire.NewMSatFromSatoshis(
@@ -1727,7 +1741,7 @@ func TestChannelLinkBandwidthConsistencyOverflow(t *testing.T) {
 		coreLink.overflowQueue.SignalFreeSlot()
 	}
 
-	time.Sleep(time.Millisecond * 200)
+	time.Sleep(time.Millisecond * 500)
 	assertLinkBandwidth(t, aliceLink, expectedBandwidth)
 
 	// Finally, at this point, the queue itself should be fully empty. As
@@ -2007,4 +2021,247 @@ func TestChannelRetransmission(t *testing.T) {
 		}
 	}
 
+}
+
+// TestShouldAdjustCommitFee tests the shouldAdjustCommitFee pivot function to
+// ensure that ie behaves properly. We should only update the fee if it
+// deviates from our current fee by more 10% or more.
+func TestShouldAdjustCommitFee(t *testing.T) {
+	tests := []struct {
+		netFee       btcutil.Amount
+		chanFee      btcutil.Amount
+		shouldAdjust bool
+	}{
+
+		// The network fee is 3x lower than the current commitment
+		// transaction. As a result, we should adjust our fee to match
+		// it.
+		{
+			netFee:       100,
+			chanFee:      3000,
+			shouldAdjust: true,
+		},
+
+		// The network fee is lower than the current commitment fee,
+		// but only slightly so, so we won't update the commitment fee.
+		{
+			netFee:       2999,
+			chanFee:      3000,
+			shouldAdjust: false,
+		},
+
+		// The network fee is lower than the commitment fee, but only
+		// right before it crosses our current threshold.
+		{
+			netFee:       1000,
+			chanFee:      1099,
+			shouldAdjust: false,
+		},
+
+		// The network fee is lower than the commitment fee, and within
+		// our range of adjustment, so we should adjust.
+		{
+			netFee:       1000,
+			chanFee:      1100,
+			shouldAdjust: true,
+		},
+
+		// The network fee is 2x higher than our commitment fee, so we
+		// should adjust upwards.
+		{
+			netFee:       2000,
+			chanFee:      1000,
+			shouldAdjust: true,
+		},
+
+		// The network fee is higher than our commitment fee, but only
+		// slightly so, so we won't update.
+		{
+			netFee:       1001,
+			chanFee:      1000,
+			shouldAdjust: false,
+		},
+
+		// The network fee is higher than our commitment fee, but
+		// hasn't yet crossed our activation threshold.
+		{
+			netFee:       1100,
+			chanFee:      1099,
+			shouldAdjust: false,
+		},
+
+		// The network fee is higher than our commitment fee, and
+		// within our activation threshold, so we should update our
+		// fee.
+		{
+			netFee:       1100,
+			chanFee:      1000,
+			shouldAdjust: true,
+		},
+
+		// Our fees match exactly, so we shouldn't update it at all.
+		{
+			netFee:       1000,
+			chanFee:      1000,
+			shouldAdjust: false,
+		},
+	}
+
+	for i, test := range tests {
+		adjustedFee := shouldAdjustCommitFee(
+			test.netFee, test.chanFee,
+		)
+
+		if adjustedFee && !test.shouldAdjust {
+			t.Fatalf("test #%v failed: net_fee=%v, "+
+				"chan_fee=%v, adjust_expect=%v, adjust_returned=%v",
+				i, test.netFee, test.chanFee, test.shouldAdjust,
+				adjustedFee)
+		}
+	}
+}
+
+// TestChannelLinkUpdateCommitFee tests that when a new block comes in, the
+// channel link properly checks to see if it should update the commitment fee.
+func TestChannelLinkUpdateCommitFee(t *testing.T) {
+	t.Parallel()
+
+	// First, we'll create our traditional three hop network. We'll only be
+	// interacting with and asserting the state of two of the end points
+	// for this test.
+	channels, cleanUp, _, err := createClusterChannels(
+		btcutil.SatoshiPerBitcoin*3,
+		btcutil.SatoshiPerBitcoin*5)
+	if err != nil {
+		t.Fatalf("unable to create channel: %v", err)
+	}
+	defer cleanUp()
+
+	n := newThreeHopNetwork(t, channels.aliceToBob, channels.bobToAlice,
+		channels.bobToCarol, channels.carolToBob, testStartingHeight)
+
+	// First, we'll set up some message interceptors to ensure that the
+	// proper messages are sent when updating fees.
+	chanID := n.aliceChannelLink.ChanID()
+	messages := []expectedMessage{
+		{"alice", "bob", &lnwire.ChannelReestablish{}, false},
+		{"bob", "alice", &lnwire.ChannelReestablish{}, false},
+
+		{"alice", "bob", &lnwire.FundingLocked{}, false},
+		{"bob", "alice", &lnwire.FundingLocked{}, false},
+
+		{"alice", "bob", &lnwire.UpdateFee{}, false},
+
+		{"alice", "bob", &lnwire.CommitSig{}, false},
+		{"bob", "alice", &lnwire.RevokeAndAck{}, false},
+		{"bob", "alice", &lnwire.CommitSig{}, false},
+		{"alice", "bob", &lnwire.RevokeAndAck{}, false},
+	}
+	n.aliceServer.intersect(createInterceptorFunc("[alice] <-- [bob]",
+		"alice", messages, chanID, false))
+	n.bobServer.intersect(createInterceptorFunc("[alice] --> [bob]",
+		"bob", messages, chanID, false))
+
+	if err := n.start(); err != nil {
+		t.Fatal(err)
+	}
+	defer n.stop()
+	defer n.feeEstimator.Stop()
+
+	// First, we'll start off all channels at "height" 9000 by sending a
+	// new epoch to all the clients.
+	select {
+	case n.aliceBlockEpoch <- &chainntnfs.BlockEpoch{
+		Height: 9000,
+	}:
+	case <-time.After(time.Second * 5):
+		t.Fatalf("link didn't read block epoch")
+	}
+	select {
+	case n.bobFirstBlockEpoch <- &chainntnfs.BlockEpoch{
+		Height: 9000,
+	}:
+	case <-time.After(time.Second * 5):
+		t.Fatalf("link didn't read block epoch")
+	}
+
+	startingFeeRate := channels.aliceToBob.CommitFeeRate()
+
+	// Next, we'll send the first fee rate response to Alice.
+	select {
+	case n.feeEstimator.weightFeeIn <- startingFeeRate / 1000:
+	case <-time.After(time.Second * 5):
+		t.Fatalf("alice didn't query for the new " +
+			"network fee")
+	}
+
+	time.Sleep(time.Millisecond * 500)
+
+	// The fee rate on the alice <-> bob channel should still be the same
+	// on both sides.
+	aliceFeeRate := channels.aliceToBob.CommitFeeRate()
+	bobFeeRate := channels.bobToAlice.CommitFeeRate()
+	if aliceFeeRate != bobFeeRate {
+		t.Fatalf("fee rates don't match: expected %v got %v",
+			aliceFeeRate, bobFeeRate)
+	}
+	if aliceFeeRate != startingFeeRate {
+		t.Fatalf("alice's fee rate shouldn't have changed: "+
+			"expected %v, got %v", aliceFeeRate, startingFeeRate)
+	}
+	if bobFeeRate != startingFeeRate {
+		t.Fatalf("bob's fee rate shouldn't have changed: "+
+			"expected %v, got %v", bobFeeRate, startingFeeRate)
+	}
+
+	// Now we'll send a new block update to all end points, with a new
+	// height THAT'S OVER 9000!!!
+	select {
+	case n.aliceBlockEpoch <- &chainntnfs.BlockEpoch{
+		Height: 9001,
+	}:
+	case <-time.After(time.Second * 5):
+		t.Fatalf("link didn't read block epoch")
+	}
+	select {
+	case n.bobFirstBlockEpoch <- &chainntnfs.BlockEpoch{
+		Height: 9001,
+	}:
+	case <-time.After(time.Second * 5):
+		t.Fatalf("link didn't read block epoch")
+	}
+
+	// Next, we'll set up a deliver a fee rate that's triple the current
+	// fee rate. This should cause the Alice (the initiator) to trigger a
+	// fee update.
+	newFeeRate := startingFeeRate * 3
+	select {
+	case n.feeEstimator.weightFeeIn <- newFeeRate:
+	case <-time.After(time.Second * 5):
+		t.Fatalf("alice didn't query for the new " +
+			"network fee")
+	}
+
+	time.Sleep(time.Second * 2)
+
+	// At this point, Alice should've triggered a new fee update that
+	// increased the fee rate to match the new rate.
+	//
+	// We'll scale the new fee rate by 100 as we deal with units of fee
+	// per-kw.
+	expectedFeeRate := newFeeRate * 1000
+	aliceFeeRate = channels.aliceToBob.CommitFeeRate()
+	bobFeeRate = channels.bobToAlice.CommitFeeRate()
+	if aliceFeeRate != expectedFeeRate {
+		t.Fatalf("alice's fee rate didn't change: expected %v, got %v",
+			expectedFeeRate, aliceFeeRate)
+	}
+	if bobFeeRate != expectedFeeRate {
+		t.Fatalf("bob's fee rate didn't change: expected %v, got %v",
+			expectedFeeRate, aliceFeeRate)
+	}
+	if aliceFeeRate != bobFeeRate {
+		t.Fatalf("fee rates don't match: expected %v got %v",
+			aliceFeeRate, bobFeeRate)
+	}
 }

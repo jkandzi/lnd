@@ -17,7 +17,7 @@
   "paths": {
     "/v1/balance/blockchain": {
       "get": {
-        "summary": "* lncli: `walletbalance`\nWalletBalance returns the sum of all confirmed unspent outputs under control\nby the wallet. This method can be modified by having the request specify\nonly witness outputs should be factored into the final output sum.",
+        "summary": "* lncli: `walletbalance`\nWalletBalance returns total unspent outputs(confirmed and unconfirmed), all confirmed unspent outputs and all unconfirmed unspent outputs under control\nby the wallet. This method can be modified by having the request specify\nonly witness outputs should be factored into the final output sum.",
         "operationId": "WalletBalance",
         "responses": {
           "200": {
@@ -147,7 +147,7 @@
     },
     "/v1/channels/{channel_point.funding_txid}/{channel_point.output_index}": {
       "delete": {
-        "summary": "* lncli: `closechannel`\nCloseChannel attempts to close an active channel identified by its channel\noutpoint (ChannelPoint). The actions of this method can additionally be\naugmented to attempt a force close after a timeout period in the case of an\ninactive peer.",
+        "summary": "* lncli: `closechannel`\nCloseChannel attempts to close an active channel identified by its channel\noutpoint (ChannelPoint). The actions of this method can additionally be\naugmented to attempt a force close after a timeout period in the case of an\ninactive peer. If a non-force close (cooperative closure) is requested,\nthen the user can specify either a target number of blocks until the\nclosure transaction is confirmed, or a manual fee rate. If neither are\nspecified, then a default lax, block confirmation target is used.",
         "operationId": "CloseChannel",
         "responses": {
           "200": {
@@ -642,7 +642,7 @@
         ]
       },
       "post": {
-        "summary": "* lncli: `sendcoins`\nSendCoins executes a request to send coins to a particular address. Unlike\nSendMany, this RPC call only allows creating a single output at a time.",
+        "summary": "* lncli: `sendcoins`\nSendCoins executes a request to send coins to a particular address. Unlike\nSendMany, this RPC call only allows creating a single output at a time. If\nneither target_conf, or sat_per_byte are set, then the internal wallet will\nconsult its fee model to determine a fee for the default confirmation\ntarget.",
         "operationId": "SendCoins",
         "responses": {
           "200": {
@@ -732,8 +732,19 @@
         },
         "blocks_til_maturity": {
           "type": "integer",
+          "format": "int32",
+          "description": "Remaining # of blocks until the commitment output can be swept.\nNegative values indicate how many blocks have passed since becoming\nmature."
+        },
+        "recovered_balance": {
+          "type": "string",
           "format": "int64",
-          "title": "/ Remaining # of blocks until funds can be sweeped into the wallet"
+          "title": "/ The total value of funds successfully recovered from this channel"
+        },
+        "pending_htlcs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/lnrpcPendingHTLC"
+          }
         }
       }
     },
@@ -774,7 +785,7 @@
         },
         "blocks_till_open": {
           "type": "integer",
-          "format": "int64",
+          "format": "int32",
           "title": "/ The number of blocks until this channel is open"
         },
         "commit_fee": {
@@ -871,6 +882,11 @@
             "$ref": "#/definitions/lnrpcHTLC"
           },
           "description": "*\nThe list of active, uncleared HTLCs currently pending within the channel."
+        },
+        "csv_delay": {
+          "type": "integer",
+          "format": "int64",
+          "description": "*\nThe CSV delay expressed in relative blocks. If the channel is force\nclosed, we'll need to wait for this many blocks before we can regain our\nfunds."
         }
       }
     },
@@ -1404,6 +1420,9 @@
           "items": {
             "$ref": "#/definitions/lnrpcNodeAddress"
           }
+        },
+        "color": {
+          "type": "string"
         }
       },
       "description": "*\nAn individual vertex/node within the channel graph. A node is\nconnected to other nodes by one or more channel edges emanating from it. As the\ngraph is directed, a node will also have an incoming edge attached to it for\neach outgoing edge."
@@ -1580,6 +1599,21 @@
           "type": "string",
           "format": "int64",
           "title": "/ The number of satoshis to push to the remote side as part of the initial commitment state"
+        },
+        "target_conf": {
+          "type": "integer",
+          "format": "int32",
+          "description": "/ The target number of blocks that the closure transaction should be confirmed by."
+        },
+        "sat_per_byte": {
+          "type": "string",
+          "format": "int64",
+          "description": "/ A manual fee rate set in sat/byte that should be used when crafting the closure transaction."
+        },
+        "private": {
+          "type": "boolean",
+          "format": "boolean",
+          "description": "/ Whether this channel should be private, not announced to the greater network."
         }
       }
     },
@@ -1743,6 +1777,40 @@
         }
       }
     },
+    "lnrpcPendingHTLC": {
+      "type": "object",
+      "properties": {
+        "incoming": {
+          "type": "boolean",
+          "format": "boolean",
+          "title": "/ The direction within the channel that the htlc was sent"
+        },
+        "amount": {
+          "type": "string",
+          "format": "int64",
+          "title": "/ The total value of the htlc"
+        },
+        "outpoint": {
+          "type": "string",
+          "title": "/ The final output to be swept back to the user's wallet"
+        },
+        "maturity_height": {
+          "type": "integer",
+          "format": "int64",
+          "title": "/ The next block height at which we can spend the current stage"
+        },
+        "blocks_til_maturity": {
+          "type": "integer",
+          "format": "int32",
+          "description": "*\nThe number of blocks remaining until the current stage can be swept.\nNegative values indicate how many blocks have passed since becoming\nmature."
+        },
+        "stage": {
+          "type": "integer",
+          "format": "int64",
+          "title": "/ Indicates whether the htlc is in its first or second stage of recovery"
+        }
+      }
+    },
     "lnrpcPendingUpdate": {
       "type": "object",
       "properties": {
@@ -1827,6 +1895,16 @@
           "type": "string",
           "format": "int64",
           "title": "/ The amount in satoshis to send"
+        },
+        "target_conf": {
+          "type": "integer",
+          "format": "int32",
+          "description": "/ The target number of blocks that this transaction should be confirmed by."
+        },
+        "sat_per_byte": {
+          "type": "string",
+          "format": "int64",
+          "description": "/ A manual fee rate set in sat/byte that should be used when crafting the transaction."
         }
       }
     },
@@ -1945,6 +2023,13 @@
           "type": "string",
           "format": "int64",
           "title": "/ Fees paid for this transaction"
+        },
+        "dest_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "/ Addresses that received funds for this transaction"
         }
       }
     },
@@ -1989,10 +2074,20 @@
     "lnrpcWalletBalanceResponse": {
       "type": "object",
       "properties": {
-        "balance": {
+        "total_balance": {
           "type": "string",
           "format": "int64",
           "title": "/ The balance of the wallet"
+        },
+        "confirmed_balance": {
+          "type": "string",
+          "format": "int64",
+          "title": "/ The confirmed balance of a wallet(with \u003e= 1 confirmations)"
+        },
+        "unconfirmed_balance": {
+          "type": "string",
+          "format": "int64",
+          "title": "/ The unconfirmed balance of a wallet(with 0 confirmations)"
         }
       }
     }

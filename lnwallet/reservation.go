@@ -1,6 +1,7 @@
 package lnwallet
 
 import (
+	"fmt"
 	"net"
 	"sync"
 
@@ -134,9 +135,10 @@ type ChannelReservation struct {
 // used only internally by lnwallet. In order to concurrent safety, the
 // creation of all channel reservations should be carried out via the
 // lnwallet.InitChannelReservation interface.
-func NewChannelReservation(capacity, fundingAmt, feePerKw btcutil.Amount,
+func NewChannelReservation(capacity, fundingAmt, commitFeePerKw btcutil.Amount,
 	wallet *LightningWallet, id uint64, pushMSat lnwire.MilliSatoshi,
-	chainHash *chainhash.Hash) *ChannelReservation {
+	chainHash *chainhash.Hash,
+	flags lnwire.FundingFlag) (*ChannelReservation, error) {
 
 	var (
 		ourBalance   lnwire.MilliSatoshi
@@ -144,7 +146,9 @@ func NewChannelReservation(capacity, fundingAmt, feePerKw btcutil.Amount,
 		initiator    bool
 	)
 
-	commitFee := btcutil.Amount((int64(feePerKw) * CommitWeight) / 1000)
+	commitFee := btcutil.Amount(
+		(int64(commitFeePerKw) * CommitWeight) / 1000,
+	)
 
 	fundingMSat := lnwire.NewMSatFromSatoshis(fundingAmt)
 	capacityMSat := lnwire.NewMSatFromSatoshis(capacity)
@@ -179,6 +183,17 @@ func NewChannelReservation(capacity, fundingAmt, feePerKw btcutil.Amount,
 		initiator = true
 	}
 
+	// If we're the initiator and our starting balance within the channel
+	// after we take account of fees is below dust, then we'll reject this
+	// channel creation request.
+	//
+	// TODO(roasbeef): reject if 30% goes to fees? dust channel
+	if initiator && ourBalance.ToSatoshis() <= DefaultDustLimit() {
+		return nil, fmt.Errorf("unable to init reservation, with "+
+			"fee=%v sat/kw, local output is too small: %v sat",
+			int64(commitFee), int64(ourBalance.ToSatoshis()))
+	}
+
 	// Next we'll set the channel type based on what we can ascertain about
 	// the balances/push amount within the channel.
 	var chanType channeldb.ChannelType
@@ -205,21 +220,22 @@ func NewChannelReservation(capacity, fundingAmt, feePerKw btcutil.Amount,
 			ChannelConfig: &channeldb.ChannelConfig{},
 		},
 		partialState: &channeldb.OpenChannel{
-			ChanType:    chanType,
-			ChainHash:   *chainHash,
-			IsPending:   true,
-			IsInitiator: initiator,
-			Capacity:    capacity,
+			ChanType:     chanType,
+			ChainHash:    *chainHash,
+			IsPending:    true,
+			IsInitiator:  initiator,
+			ChannelFlags: flags,
+			Capacity:     capacity,
 			LocalCommitment: channeldb.ChannelCommitment{
 				LocalBalance:  ourBalance,
 				RemoteBalance: theirBalance,
-				FeePerKw:      feePerKw,
+				FeePerKw:      commitFeePerKw,
 				CommitFee:     commitFee,
 			},
 			RemoteCommitment: channeldb.ChannelCommitment{
 				LocalBalance:  ourBalance,
 				RemoteBalance: theirBalance,
-				FeePerKw:      feePerKw,
+				FeePerKw:      commitFeePerKw,
 				CommitFee:     commitFee,
 			},
 			Db: wallet.Cfg.Database,
@@ -229,7 +245,7 @@ func NewChannelReservation(capacity, fundingAmt, feePerKw btcutil.Amount,
 		chanOpen:      make(chan *openChanDetails, 1),
 		chanOpenErr:   make(chan error, 1),
 		wallet:        wallet,
-	}
+	}, nil
 }
 
 // SetNumConfsRequired sets the number of confirmations that are required for
@@ -242,6 +258,16 @@ func (r *ChannelReservation) SetNumConfsRequired(numConfs uint16) {
 	defer r.Unlock()
 
 	r.partialState.NumConfsRequired = numConfs
+}
+
+// RegisterMinHTLC registers our desired amount for the smallest acceptable
+// HTLC we'll accept within this channel. Any HTLC's that are extended which
+// are below this value will SHOULD be rejected.
+func (r *ChannelReservation) RegisterMinHTLC(minHTLC lnwire.MilliSatoshi) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.ourContribution.MinHTLC = minHTLC
 }
 
 // CommitConstraints takes the constraints that the remote party specifies for
@@ -274,9 +300,10 @@ func (r *ChannelReservation) RemoteChanConstraints() (btcutil.Amount, lnwire.Mil
 
 	// TODO(roasbeef): move csv delay calculation into func?
 
-	// By default, we'll require them to maintain at least 1% of thee total
-	// channel capacity at all times.
-	chanReserve := (chanCapacity + 99) / 100
+	// By default, we'll require them to maintain at least 1% of the total
+	// channel capacity at all times. This is the absolute amount the
+	// settled balance of the remote party must be above at *all* times.
+	chanReserve := (chanCapacity) / 100
 
 	// We'll allow them to fully utilize the full bandwidth of the channel,
 	// minus our required reserve.

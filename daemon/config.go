@@ -34,8 +34,9 @@ const (
 	defaultPeerPort           = 9735
 	defaultRPCHost            = "localhost"
 	defaultMaxPendingChannels = 1
-	defaultNumChanConfs       = 1
+	defaultNumChanConfs       = 3
 	defaultNoEncryptWallet    = false
+	defaultTrickleDelay       = 30 * 1000
 )
 
 var (
@@ -51,7 +52,7 @@ var (
 
 type chainConfig struct {
 	Active   bool   `long:"active" description:"If the chain should be active or not."`
-	ChainDir string `long:"chaindir" description:"The directory to store the chains's data within."`
+	ChainDir string `long:"chaindir" description:"The directory to store the chain's data within."`
 
 	RPCHost    string `long:"rpchost" description:"The daemon's rpc listening address. If a port is omitted, then the default port for the selected chain parameters will be used."`
 	RPCUser    string `long:"rpcuser" description:"Username for RPC connections"`
@@ -124,6 +125,8 @@ type config struct {
 	NoNetBootstrap bool `long:"nobootstrap" description:"If true, then automatic network bootstrapping will not be attempted."`
 
 	NoEncryptWallet bool `long:"noencryptwallet" description:"If set, wallet will be encrypted using the default passphrase."`
+
+	TrickleDelay int `long:"trickledelay" description:"Time in milliseconds between each release of announcements to the network"`
 }
 
 // loadConfig initializes and parses the config using a config file and command
@@ -171,6 +174,7 @@ func loadConfig(appDir string) (*config, error) {
 			MaxChannels: 5,
 			Allocation:  0.6,
 		},
+		TrickleDelay: defaultTrickleDelay,
 	}
 
 	// Pre-parse the command line options to pick up an alternative config
@@ -409,7 +413,7 @@ func cleanAndExpandPath(path string) string {
 // the levels accordingly. An appropriate error is returned if anything is
 // invalid.
 func parseAndSetDebugLevels(debugLevel string) error {
-	// When the specified string doesn't have any delimters, treat it as
+	// When the specified string doesn't have any delimiters, treat it as
 	// the log level for all subsystems.
 	if !strings.Contains(debugLevel, ",") && !strings.Contains(debugLevel, "=") {
 		// Validate debug log level.

@@ -147,13 +147,53 @@ func addrPairsToOutputs(addrPairs map[string]int64) ([]*wire.TxOut, error) {
 // sendCoinsOnChain makes an on-chain transaction in or to send coins to one or
 // more addresses specified in the passed payment map. The payment map maps an
 // address to a specified output value to be sent to that address.
-func (r *rpcServer) sendCoinsOnChain(paymentMap map[string]int64) (*chainhash.Hash, error) {
+func (r *rpcServer) sendCoinsOnChain(paymentMap map[string]int64,
+	feePerByte btcutil.Amount) (*chainhash.Hash, error) {
+
 	outputs, err := addrPairsToOutputs(paymentMap)
 	if err != nil {
 		return nil, err
 	}
 
-	return r.server.cc.wallet.SendOutputs(outputs)
+	return r.server.cc.wallet.SendOutputs(outputs, feePerByte)
+}
+
+// determineFeePerByte will determine the fee in sat/byte that should be paid
+// given an estimator, a confirmation target, and a manual value for sat/byte.
+// A value is chosen based on the two free paramters as one, or both of them
+// can be zero.
+func determineFeePerByte(feeEstimator lnwallet.FeeEstimator, targetConf int32,
+	satPerByte int64) (btcutil.Amount, error) {
+
+	switch {
+	// If the target number of confirmations is set, then we'll use that to
+	// consult our fee estimator for an adquate fee.
+	case targetConf != 0:
+		satPerByte, err := feeEstimator.EstimateFeePerByte(
+			uint32(targetConf),
+		)
+		if err != nil {
+			return 0, fmt.Errorf("unable to query fee "+
+				"estimator: %v", err)
+		}
+
+		return btcutil.Amount(satPerByte), nil
+
+	// If a manual sat/byte fee rate is set, then we'll use that diretly.
+	case satPerByte != 0:
+		return btcutil.Amount(satPerByte), nil
+
+	// Otherwise, we'll attempt a relaxed confirmation target for the
+	// transaction
+	default:
+		satPerByte, err := feeEstimator.EstimateFeePerByte(6)
+		if err != nil {
+			return 0, fmt.Errorf("unable to query fee "+
+				"estimator: %v", err)
+		}
+
+		return satPerByte, nil
+	}
 }
 
 // SendCoins executes a request to send coins to a particular address. Unlike
@@ -169,10 +209,20 @@ func (r *rpcServer) SendCoins(ctx context.Context,
 		}
 	}
 
-	rpcsLog.Infof("[sendcoins] addr=%v, amt=%v", in.Addr, btcutil.Amount(in.Amount))
+	// Based on the passed fee related paramters, we'll determine an
+	// approriate fee rate for this transaction.
+	feePerByte, err := determineFeePerByte(
+		r.server.cc.feeEstimator, in.TargetConf, in.SatPerByte,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	rpcsLog.Infof("[sendcoins] addr=%v, amt=%v, sat/byte=%v",
+		in.Addr, btcutil.Amount(in.Amount), int64(feePerByte))
 
 	paymentMap := map[string]int64{in.Addr: in.Amount}
-	txid, err := r.sendCoinsOnChain(paymentMap)
+	txid, err := r.sendCoinsOnChain(paymentMap, feePerByte)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +245,19 @@ func (r *rpcServer) SendMany(ctx context.Context,
 		}
 	}
 
-	txid, err := r.sendCoinsOnChain(in.AddrToAmount)
+	// Based on the passed fee related paramters, we'll determine an
+	// approriate fee rate for this transaction.
+	feePerByte, err := determineFeePerByte(
+		r.server.cc.feeEstimator, in.TargetConf, in.SatPerByte,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	rpcsLog.Infof("[sendmany] outputs=%v, sat/byte=%v",
+		spew.Sdump(in.AddrToAmount), int64(feePerByte))
+
+	txid, err := r.sendCoinsOnChain(in.AddrToAmount, feePerByte)
 	if err != nil {
 		return nil, err
 	}
@@ -547,12 +609,25 @@ func (r *rpcServer) OpenChannel(in *lnrpc.OpenChannelRequest,
 		nodePubKeyBytes = nodePubKey.SerializeCompressed()
 	}
 
+	// Based on the passed fee related paramters, we'll determine an
+	// approriate fee rate for the funding transaction.
+	feePerByte, err := determineFeePerByte(
+		r.server.cc.feeEstimator, in.TargetConf, in.SatPerByte,
+	)
+	if err != nil {
+		return err
+	}
+
+	rpcsLog.Debugf("[openchannel]: using fee of %v sat/byte for funding "+
+		"tx", int64(feePerByte))
+
 	// Instruct the server to trigger the necessary events to attempt to
 	// open a new channel. A stream is returned in place, this stream will
 	// be used to consume updates of the state of the pending channel.
 	updateChan, errChan := r.server.OpenChannel(
 		in.TargetPeerId, nodePubKey, localFundingAmt,
 		lnwire.NewMSatFromSatoshis(remoteInitialBalance),
+		feePerByte, in.Private,
 	)
 
 	var outpoint wire.OutPoint
@@ -656,9 +731,22 @@ func (r *rpcServer) OpenChannelSync(ctx context.Context,
 			"initial state must be below the local funding amount")
 	}
 
+	// Based on the passed fee related paramters, we'll determine an
+	// approriate fee rate for the funding transaction.
+	feePerByte, err := determineFeePerByte(
+		r.server.cc.feeEstimator, in.TargetConf, in.SatPerByte,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	rpcsLog.Tracef("[openchannel] target sat/byte for funding tx: %v",
+		int64(feePerByte))
+
 	updateChan, errChan := r.server.OpenChannel(
 		in.TargetPeerId, nodepubKey, localFundingAmt,
 		lnwire.NewMSatFromSatoshis(remoteInitialBalance),
+		feePerByte, in.Private,
 	)
 
 	select {
@@ -734,7 +822,9 @@ func (r *rpcServer) CloseChannel(in *lnrpc.CloseChannelRequest,
 		if err != nil {
 			return err
 		}
-		defer channel.Stop()
+		defer func() {
+			channel.Stop()
+		}()
 
 		_, bestHeight, err := r.server.cc.chainIO.GetBestBlock()
 		if err != nil {
@@ -750,7 +840,7 @@ func (r *rpcServer) CloseChannel(in *lnrpc.CloseChannelRequest,
 			// TODO(roasbeef): actually get the active channel
 			// instead too?
 			//  * so only need to grab from database
-			peer.WipeChannel(channel)
+			peer.WipeChannel(channel.ChannelPoint())
 		} else {
 			chanID := lnwire.NewChanIDFromOutPoint(channel.ChannelPoint())
 			r.server.htlcSwitch.RemoveLink(chanID)
@@ -780,6 +870,8 @@ func (r *rpcServer) CloseChannel(in *lnrpc.CloseChannelRequest,
 				},
 			},
 		}
+
+		channel.CancelObserver()
 
 		errChan = make(chan error, 1)
 		notifier := r.server.cc.chainNotifier
@@ -811,12 +903,39 @@ func (r *rpcServer) CloseChannel(in *lnrpc.CloseChannelRequest,
 				}
 			})
 	} else {
+		// Based on the passed fee related paramters, we'll determine
+		// an approriate fee rate for the cooperative closure
+		// transaction.
+		feePerByte, err := determineFeePerByte(
+			r.server.cc.feeEstimator, in.TargetConf, in.SatPerByte,
+		)
+		if err != nil {
+			return err
+		}
+
+		rpcsLog.Debugf("Target sat/byte for closing transaction: %v",
+			int64(feePerByte))
+
+		// When crating commitment transaction, or closure
+		// transactions, we typically deal in fees per-kw, so we'll
+		// convert now before passing the close request to the switch.
+		feePerWeight := (feePerByte / blockchain.WitnessScaleFactor)
+		if feePerWeight == 0 {
+			// If the fee rate returned isn't usable, then we'll
+			// fall back to an lax fee estimate.
+			feePerWeight, err = r.server.cc.feeEstimator.EstimateFeePerWeight(6)
+			if err != nil {
+				return err
+			}
+		}
+
 		// Otherwise, the caller has requested a regular interactive
 		// cooperative channel closure. So we'll forward the request to
 		// the htlc switch which will handle the negotiation and
 		// broadcast details.
+		feePerKw := feePerWeight * 1000
 		updateChan, errChan = r.server.htlcSwitch.CloseLink(chanPoint,
-			htlcswitch.CloseRegular)
+			htlcswitch.CloseRegular, feePerKw)
 	}
 out:
 	for {
@@ -942,7 +1061,9 @@ func (r *rpcServer) forceCloseChan(channel *lnwallet.LightningChannel) (*chainha
 
 	// Send the closed channel summary over to the utxoNursery in order to
 	// have its outputs swept back into the wallet once they're mature.
-	r.server.utxoNursery.IncubateOutputs(closeSummary)
+	if err := r.server.utxoNursery.IncubateOutputs(closeSummary); err != nil {
+		return nil, nil, err
+	}
 
 	return &txid, closeSummary, nil
 }
@@ -1063,10 +1184,10 @@ func (r *rpcServer) ListPeers(ctx context.Context,
 	return resp, nil
 }
 
-// WalletBalance returns the sum of all confirmed unspent outputs under control
+// WalletBalance returns total unspent outputs(confirmed and unconfirmed), all
+// confirmed unspent outputs and all unconfirmed unspent outputs under control
 // by the wallet. This method can be modified by having the request specify
 // only witness outputs should be factored into the final output sum.
-// TODO(roasbeef): split into total and confirmed/unconfirmed
 // TODO(roasbeef): add async hooks into wallet balance changes
 func (r *rpcServer) WalletBalance(ctx context.Context,
 	in *lnrpc.WalletBalanceRequest) (*lnrpc.WalletBalanceResponse, error) {
@@ -1079,15 +1200,27 @@ func (r *rpcServer) WalletBalance(ctx context.Context,
 		}
 	}
 
-	balance, err := r.server.cc.wallet.ConfirmedBalance(1, in.WitnessOnly)
+	// Get total balance, from txs that have >= 0 confirmations.
+	totalBal, err := r.server.cc.wallet.ConfirmedBalance(0, in.WitnessOnly)
 	if err != nil {
 		return nil, err
 	}
 
-	rpcsLog.Debugf("[walletbalance] balance=%v", balance)
+	// Get confirmed balance, from txs that have >= 1 confirmations.
+	confirmedBal, err := r.server.cc.wallet.ConfirmedBalance(1, in.WitnessOnly)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get uncomfirmed balance, from txs with 0 confirmations.
+	unconfirmedBal := totalBal - confirmedBal
+
+	rpcsLog.Debugf("[walletbalance] Total balance=%v", totalBal)
 
 	return &lnrpc.WalletBalanceResponse{
-		Balance: int64(balance),
+		TotalBalance:       int64(totalBal),
+		ConfirmedBalance:   int64(confirmedBal),
+		UnconfirmedBalance: int64(unconfirmedBal),
 	}, nil
 }
 
@@ -1134,6 +1267,11 @@ func (r *rpcServer) PendingChannels(ctx context.Context,
 		}
 	}
 
+	_, bestHeight, err := r.server.cc.chainIO.GetBestBlock()
+	if err != nil {
+		return nil, err
+	}
+
 	rpcsLog.Debugf("[pendingchannels]")
 
 	resp := &lnrpc.PendingChannelResponse{}
@@ -1162,6 +1300,8 @@ func (r *rpcServer) PendingChannels(ctx context.Context,
 		commitBaseWeight := blockchain.GetTransactionWeight(utx)
 		commitWeight := commitBaseWeight + lnwallet.WitnessCommitmentTxWeight
 
+		targetConfHeight := pendingChan.FundingBroadcastHeight + uint32(pendingChan.NumConfsRequired)
+		blocksTillOpen := int32(targetConfHeight) - bestHeight
 		resp.PendingOpenChannels[i] = &lnrpc.PendingChannelResponse_PendingOpenChannel{
 			Channel: &lnrpc.PendingChannelResponse_PendingChannel{
 				RemoteNodePub: hex.EncodeToString(pub),
@@ -1170,9 +1310,10 @@ func (r *rpcServer) PendingChannels(ctx context.Context,
 				LocalBalance:  int64(localCommitment.LocalBalance.ToSatoshis()),
 				RemoteBalance: int64(localCommitment.RemoteBalance.ToSatoshis()),
 			},
-			CommitWeight: commitWeight,
-			CommitFee:    int64(localCommitment.CommitFee),
-			FeePerKw:     int64(localCommitment.FeePerKw),
+			CommitWeight:   commitWeight,
+			CommitFee:      int64(localCommitment.CommitFee),
+			FeePerKw:       int64(localCommitment.FeePerKw),
+			BlocksTillOpen: blocksTillOpen,
 			// TODO(roasbeef): need to track confirmation height
 		}
 	}
@@ -1241,13 +1382,37 @@ func (r *rpcServer) PendingChannels(ctx context.Context,
 			// we can ultimately sweep the funds into the wallet.
 			if nurseryInfo != nil {
 				forceClose.LimboBalance = int64(nurseryInfo.limboBalance)
+				forceClose.RecoveredBalance = int64(nurseryInfo.recoveredBalance)
 				forceClose.MaturityHeight = nurseryInfo.maturityHeight
 
 				// If the transaction has been confirmed, then
 				// we can compute how many blocks it has left.
 				if forceClose.MaturityHeight != 0 {
-					forceClose.BlocksTilMaturity = (forceClose.MaturityHeight -
-						uint32(currentHeight))
+					forceClose.BlocksTilMaturity =
+						int32(forceClose.MaturityHeight) -
+							currentHeight
+				}
+
+				for _, htlcReport := range nurseryInfo.htlcs {
+					// TODO(conner) set incoming flag
+					// appropriately after handling incoming
+					// incubation
+					htlc := &lnrpc.PendingHTLC{
+						Incoming:       false,
+						Amount:         int64(htlcReport.amount),
+						Outpoint:       htlcReport.outpoint.String(),
+						MaturityHeight: htlcReport.maturityHeight,
+						Stage:          htlcReport.stage,
+					}
+
+					if htlc.MaturityHeight != 0 {
+						htlc.BlocksTilMaturity =
+							int32(htlc.MaturityHeight) -
+								currentHeight
+					}
+
+					forceClose.PendingHtlcs = append(forceClose.PendingHtlcs,
+						htlc)
 				}
 
 				resp.TotalLimboBalance += int64(nurseryInfo.limboBalance)
@@ -1307,6 +1472,15 @@ func (r *rpcServer) ListChannels(ctx context.Context,
 			peerOnline = true
 		}
 
+		channelID := lnwire.NewChanIDFromOutPoint(&chanPoint)
+		var linkActive bool
+		if link, err := r.server.htlcSwitch.GetLink(channelID); err == nil {
+			// A channel is only considered active if it is known
+			// by the switch *and* able to forward
+			// incoming/outgoing payments.
+			linkActive = link.EligibleToForward()
+		}
+
 		// As this is required for display purposes, we'll calculate
 		// the weight of the commitment transaction. We also add on the
 		// estimated weight of the witness to calculate the weight of
@@ -1317,27 +1491,44 @@ func (r *rpcServer) ListChannels(ctx context.Context,
 		commitBaseWeight := blockchain.GetTransactionWeight(utx)
 		commitWeight := commitBaseWeight + lnwallet.WitnessCommitmentTxWeight
 
+		localBalance := localCommit.LocalBalance
+		remoteBalance := localCommit.RemoteBalance
+
+		// As an artefact of our usage of mSAT internally, either party
+		// may end up in a state where they're holding a fractional
+		// amount of satoshis which can't be expressed within the
+		// actual commitment output. Since we round down when going
+		// from mSAT -> SAT, we may at any point be adding an
+		// additional SAT to miners fees. As a result, we display a
+		// commitment fee that accounts for this externally.
+		var sumOutputs btcutil.Amount
+		for _, txOut := range localCommit.CommitTx.TxOut {
+			sumOutputs += btcutil.Amount(txOut.Value)
+		}
+		externalCommitFee := dbChannel.Capacity - sumOutputs
+
 		channel := &lnrpc.ActiveChannel{
-			Active:                peerOnline,
+			Active:                peerOnline && linkActive,
 			RemotePubkey:          nodeID,
 			ChannelPoint:          chanPoint.String(),
 			ChanId:                chanID,
 			Capacity:              int64(dbChannel.Capacity),
-			LocalBalance:          int64(localCommit.LocalBalance.ToSatoshis()),
-			RemoteBalance:         int64(localCommit.RemoteBalance.ToSatoshis()),
-			CommitFee:             int64(localCommit.CommitFee),
+			LocalBalance:          int64(localBalance.ToSatoshis()),
+			RemoteBalance:         int64(remoteBalance.ToSatoshis()),
+			CommitFee:             int64(externalCommitFee),
 			CommitWeight:          commitWeight,
 			FeePerKw:              int64(localCommit.FeePerKw),
 			TotalSatoshisSent:     int64(dbChannel.TotalMSatSent.ToSatoshis()),
 			TotalSatoshisReceived: int64(dbChannel.TotalMSatReceived.ToSatoshis()),
 			NumUpdates:            localCommit.CommitHeight,
 			PendingHtlcs:          make([]*lnrpc.HTLC, len(localCommit.Htlcs)),
+			CsvDelay:              uint32(dbChannel.LocalChanCfg.CsvDelay),
 		}
 
 		for i, htlc := range localCommit.Htlcs {
 			channel.PendingHtlcs[i] = &lnrpc.HTLC{
 				Incoming:         htlc.Incoming,
-				Amount:           int64(htlc.Amt),
+				Amount:           int64(htlc.Amt.ToSatoshis()),
 				HashLock:         htlc.RHash[:],
 				ExpirationHeight: htlc.RefundTimeout,
 			}
@@ -1624,7 +1815,7 @@ func (r *rpcServer) SendPayment(paymentStream lnrpc.Lightning_SendPaymentServer)
 
 				err = paymentStream.Send(&lnrpc.SendResponse{
 					PaymentPreimage: preImage[:],
-					PaymentRoute:    marshalRoute(route),
+					PaymentRoute:    marshallRoute(route),
 				})
 				if err != nil {
 					errChan <- err
@@ -1759,7 +1950,7 @@ func (r *rpcServer) SendPaymentSync(ctx context.Context,
 
 	return &lnrpc.SendResponse{
 		PaymentPreimage: preImage[:],
-		PaymentRoute:    marshalRoute(route),
+		PaymentRoute:    marshallRoute(route),
 	}, nil
 }
 
@@ -1957,6 +2148,11 @@ func createRPCInvoice(invoice *channeldb.Invoice) (*lnrpc.Invoice, error) {
 		fallbackAddr = decoded.FallbackAddr.String()
 	}
 
+	settleDate := int64(0)
+	if !invoice.SettleDate.IsZero() {
+		settleDate = invoice.SettleDate.Unix()
+	}
+
 	// Expiry time will default to 3600 seconds if not specified
 	// explicitly.
 	expiry := int64(decoded.Expiry().Seconds())
@@ -1974,6 +2170,7 @@ func createRPCInvoice(invoice *channeldb.Invoice) (*lnrpc.Invoice, error) {
 		RPreimage:       preimage[:],
 		Value:           int64(satAmt),
 		CreationDate:    invoice.CreationDate.Unix(),
+		SettleDate:      settleDate,
 		Settled:         invoice.Terms.Settled,
 		PaymentRequest:  paymentRequest,
 		DescriptionHash: descHash,
@@ -2173,7 +2370,7 @@ func (r *rpcServer) GetTransactions(ctx context.Context,
 		}
 	}
 
-	// TODO(btcsuite): add pagination support
+	// TODO(roasbeef): add pagination support
 	transactions, err := r.server.cc.wallet.ListTransactionDetails()
 	if err != nil {
 		return nil, err
@@ -2183,6 +2380,11 @@ func (r *rpcServer) GetTransactions(ctx context.Context,
 		Transactions: make([]*lnrpc.Transaction, len(transactions)),
 	}
 	for i, tx := range transactions {
+		var destAddresses []string
+		for _, destAddress := range tx.DestAddresses {
+			destAddresses = append(destAddresses, destAddress.EncodeAddress())
+		}
+
 		txDetails.Transactions[i] = &lnrpc.Transaction{
 			TxHash:           tx.Hash.String(),
 			Amount:           int64(tx.Value),
@@ -2191,6 +2393,7 @@ func (r *rpcServer) GetTransactions(ctx context.Context,
 			BlockHeight:      tx.BlockHeight,
 			TimeStamp:        tx.Timestamp,
 			TotalFees:        tx.TotalFees,
+			DestAddresses:    destAddresses,
 		}
 	}
 
@@ -2233,11 +2436,14 @@ func (r *rpcServer) DescribeGraph(ctx context.Context,
 			}
 			nodeAddrs = append(nodeAddrs, nodeAddr)
 		}
+
+		nodeColor := fmt.Sprintf("#%02x%02x%02x", node.Color.R, node.Color.G, node.Color.B)
 		resp.Nodes = append(resp.Nodes, &lnrpc.LightningNode{
 			LastUpdate: uint32(node.LastUpdate.Unix()),
 			PubKey:     hex.EncodeToString(node.PubKey.SerializeCompressed()),
 			Addresses:  nodeAddrs,
 			Alias:      node.Alias,
+			Color:      nodeColor,
 		})
 
 		return nil
@@ -2397,12 +2603,15 @@ func (r *rpcServer) GetNodeInfo(ctx context.Context,
 		nodeAddrs = append(nodeAddrs, nodeAddr)
 	}
 	// TODO(roasbeef): list channels as well?
+
+	nodeColor := fmt.Sprintf("#%02x%02x%02x", node.Color.R, node.Color.G, node.Color.B)
 	return &lnrpc.NodeInfo{
 		Node: &lnrpc.LightningNode{
 			LastUpdate: uint32(node.LastUpdate.Unix()),
 			PubKey:     in.PubKey,
 			Addresses:  nodeAddrs,
 			Alias:      node.Alias,
+			Color:      nodeColor,
 		},
 		NumChannels:   numChannels,
 		TotalCapacity: int64(totalCapcity),
@@ -2464,13 +2673,13 @@ func (r *rpcServer) QueryRoutes(ctx context.Context,
 		Routes: make([]*lnrpc.Route, len(routes)),
 	}
 	for i, route := range routes {
-		routeResp.Routes[i] = marshalRoute(route)
+		routeResp.Routes[i] = marshallRoute(route)
 	}
 
 	return routeResp, nil
 }
 
-func marshalRoute(route *routing.Route) *lnrpc.Route {
+func marshallRoute(route *routing.Route) *lnrpc.Route {
 	resp := &lnrpc.Route{
 		TotalTimeLock: route.TotalTimeLock,
 		TotalFees:     int64(route.TotalFees.ToSatoshis()),
@@ -2582,7 +2791,7 @@ func (r *rpcServer) GetNetworkInfo(ctx context.Context,
 	}
 
 	// If we don't have any channels, then reset the minChannelSize to zero
-	// to avoid outputting NaN in encoded JSOn.
+	// to avoid outputting NaN in encoded JSON.
 	if numChannels == 0 {
 		minChannelSize = 0
 	}

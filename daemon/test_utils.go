@@ -83,6 +83,7 @@ func createTestPeer(notifier chainntnfs.ChainNotifier,
 		RevocationBasePoint: aliceKeyPub,
 		PaymentBasePoint:    aliceKeyPub,
 		DelayBasePoint:      aliceKeyPub,
+		HtlcBasePoint:       aliceKeyPub,
 	}
 	bobCfg := channeldb.ChannelConfig{
 		ChannelConstraints: channeldb.ChannelConstraints{
@@ -97,6 +98,7 @@ func createTestPeer(notifier chainntnfs.ChainNotifier,
 		RevocationBasePoint: bobKeyPub,
 		PaymentBasePoint:    bobKeyPub,
 		DelayBasePoint:      bobKeyPub,
+		HtlcBasePoint:       bobKeyPub,
 	}
 
 	bobRoot := lnwallet.DeriveRevocationRoot(bobKeyPriv, testHdSeed, aliceKeyPub)
@@ -117,7 +119,7 @@ func createTestPeer(notifier chainntnfs.ChainNotifier,
 
 	aliceCommitTx, bobCommitTx, err := lnwallet.CreateCommitmentTxns(channelBal,
 		channelBal, &aliceCfg, &bobCfg, aliceCommitPoint, bobCommitPoint,
-		fundingTxIn)
+		*fundingTxIn)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -135,13 +137,19 @@ func createTestPeer(notifier chainntnfs.ChainNotifier,
 	}
 
 	estimator := &lnwallet.StaticFeeEstimator{FeeRate: 50}
-	feePerKw := btcutil.Amount(estimator.EstimateFeePerWeight(1) * 1000)
+	feePerWeight, err := estimator.EstimateFeePerWeight(1)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	feePerKw := feePerWeight * 1000
+
 	// TODO(roasbeef): need to factor in commit fee?
 	aliceCommit := channeldb.ChannelCommitment{
 		CommitHeight:  0,
 		LocalBalance:  lnwire.NewMSatFromSatoshis(channelBal),
 		RemoteBalance: lnwire.NewMSatFromSatoshis(channelBal),
 		FeePerKw:      feePerKw,
+		CommitFee:     8688,
 		CommitTx:      aliceCommitTx,
 		CommitSig:     bytes.Repeat([]byte{1}, 71),
 	}
@@ -150,6 +158,7 @@ func createTestPeer(notifier chainntnfs.ChainNotifier,
 		LocalBalance:  lnwire.NewMSatFromSatoshis(channelBal),
 		RemoteBalance: lnwire.NewMSatFromSatoshis(channelBal),
 		FeePerKw:      feePerKw,
+		CommitFee:     8688,
 		CommitTx:      bobCommitTx,
 		CommitSig:     bytes.Repeat([]byte{1}, 71),
 	}
@@ -256,9 +265,9 @@ func createTestPeer(notifier chainntnfs.ChainNotifier,
 		activeChannels: make(map[lnwire.ChannelID]*lnwallet.LightningChannel),
 		newChannels:    make(chan *newChannelMsg, 1),
 
-		localCloseChanReqs:    make(chan *htlcswitch.ChanClose),
-		shutdownChanReqs:      make(chan *lnwire.Shutdown),
-		closingSignedChanReqs: make(chan *lnwire.ClosingSigned),
+		activeChanCloses:   make(map[lnwire.ChannelID]*channelCloser),
+		localCloseChanReqs: make(chan *htlcswitch.ChanClose),
+		chanCloseMsgs:      make(chan *closeMsg),
 
 		queueQuit: make(chan struct{}),
 		quit:      make(chan struct{}),
