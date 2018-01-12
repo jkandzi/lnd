@@ -109,7 +109,7 @@
           "200": {
             "description": "",
             "schema": {
-              "$ref": "#/definitions/lnrpcPendingChannelResponse"
+              "$ref": "#/definitions/lnrpcPendingChannelsResponse"
             }
           }
         },
@@ -696,11 +696,11 @@
     }
   },
   "definitions": {
-    "PendingChannelResponseClosedChannel": {
+    "PendingChannelsResponseClosedChannel": {
       "type": "object",
       "properties": {
         "channel": {
-          "$ref": "#/definitions/PendingChannelResponsePendingChannel",
+          "$ref": "#/definitions/PendingChannelsResponsePendingChannel",
           "title": "/ The pending channel to be closed"
         },
         "closing_txid": {
@@ -709,11 +709,11 @@
         }
       }
     },
-    "PendingChannelResponseForceClosedChannel": {
+    "PendingChannelsResponseForceClosedChannel": {
       "type": "object",
       "properties": {
         "channel": {
-          "$ref": "#/definitions/PendingChannelResponsePendingChannel",
+          "$ref": "#/definitions/PendingChannelsResponsePendingChannel",
           "title": "/ The pending channel to be force closed"
         },
         "closing_txid": {
@@ -748,7 +748,7 @@
         }
       }
     },
-    "PendingChannelResponsePendingChannel": {
+    "PendingChannelsResponsePendingChannel": {
       "type": "object",
       "properties": {
         "remote_node_pub": {
@@ -771,22 +771,17 @@
         }
       }
     },
-    "PendingChannelResponsePendingOpenChannel": {
+    "PendingChannelsResponsePendingOpenChannel": {
       "type": "object",
       "properties": {
         "channel": {
-          "$ref": "#/definitions/PendingChannelResponsePendingChannel",
+          "$ref": "#/definitions/PendingChannelsResponsePendingChannel",
           "title": "/ The pending channel"
         },
         "confirmation_height": {
           "type": "integer",
           "format": "int64",
           "title": "/ The height at which this channel will be confirmed"
-        },
-        "blocks_till_open": {
-          "type": "integer",
-          "format": "int32",
-          "title": "/ The number of blocks until this channel is open"
         },
         "commit_fee": {
           "type": "string",
@@ -1249,6 +1244,13 @@
             "type": "string"
           },
           "title": "/ A list of active chains the node is connected to"
+        },
+        "uris": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "/ The URIs of the current node."
         }
       }
     },
@@ -1746,7 +1748,7 @@
         }
       }
     },
-    "lnrpcPendingChannelResponse": {
+    "lnrpcPendingChannelsResponse": {
       "type": "object",
       "properties": {
         "total_limbo_balance": {
@@ -1757,21 +1759,21 @@
         "pending_open_channels": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/PendingChannelResponsePendingOpenChannel"
+            "$ref": "#/definitions/PendingChannelsResponsePendingOpenChannel"
           },
           "title": "/ Channels pending opening"
         },
         "pending_closing_channels": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/PendingChannelResponseClosedChannel"
+            "$ref": "#/definitions/PendingChannelsResponseClosedChannel"
           },
           "title": "/ Channels pending closing"
         },
         "pending_force_closing_channels": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/PendingChannelResponseForceClosedChannel"
+            "$ref": "#/definitions/PendingChannelsResponseForceClosedChannel"
           },
           "title": "/ Channels pending force closing"
         }
@@ -1972,9 +1974,6 @@
           "$ref": "#/definitions/lnrpcRoute"
         }
       }
-    },
-    "lnrpcSetAliasResponse": {
-      "type": "object"
     },
     "lnrpcSignMessageResponse": {
       "type": "object",

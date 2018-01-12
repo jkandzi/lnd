@@ -470,7 +470,7 @@ func (r *rpcServer) ConnectPeer(ctx context.Context,
 }
 
 // DisconnectPeer attempts to disconnect one peer from another identified by a
-// given pubKey. In the case that we currently ahve a pending or active channel
+// given pubKey. In the case that we currently have a pending or active channel
 // with the target peer, this action will be disallowed.
 func (r *rpcServer) DisconnectPeer(ctx context.Context,
 	in *lnrpc.DisconnectPeerRequest) (*lnrpc.DisconnectPeerResponse, error) {
@@ -519,7 +519,7 @@ func (r *rpcServer) DisconnectPeer(ctx context.Context,
 	}
 
 	// With all initial validation complete, we'll now request that the
-	// sever disconnects from the per.
+	// server disconnects from the peer.
 	if err := r.server.DisconnectPeer(peerPubKey); err != nil {
 		return nil, fmt.Errorf("unable to disconnect peer: %v", err)
 	}
@@ -591,7 +591,7 @@ func (r *rpcServer) OpenChannel(in *lnrpc.OpenChannelRequest,
 
 	// TODO(roasbeef): also return channel ID?
 
-	// If the node key is set, the we'll parse the raw bytes into a pubkey
+	// If the node key is set, then we'll parse the raw bytes into a pubkey
 	// object so we can easily manipulate it. If this isn't set, then we
 	// expected the TargetPeerId to be set accordingly.
 	if len(in.NodePubkey) != 0 {
@@ -724,7 +724,7 @@ func (r *rpcServer) OpenChannelSync(ctx context.Context,
 	remoteInitialBalance := btcutil.Amount(in.PushSat)
 
 	// Ensure that the initial balance of the remote party (if pushing
-	// satoshis) does not execeed the amount the local party has requested
+	// satoshis) does not exceed the amount the local party has requested
 	// for funding.
 	if remoteInitialBalance >= localFundingAmt {
 		return nil, fmt.Errorf("amount pushed to remote peer for " +
@@ -732,7 +732,7 @@ func (r *rpcServer) OpenChannelSync(ctx context.Context,
 	}
 
 	// Based on the passed fee related paramters, we'll determine an
-	// approriate fee rate for the funding transaction.
+	// appropriate fee rate for the funding transaction.
 	feePerByte, err := determineFeePerByte(
 		r.server.cc.feeEstimator, in.TargetConf, in.SatPerByte,
 	)
@@ -1096,6 +1096,7 @@ func (r *rpcServer) GetInfo(ctx context.Context,
 	nPendingChannels := uint32(len(pendingChannels))
 
 	idPub := r.server.identityPriv.PubKey().SerializeCompressed()
+	encodedIDPub := hex.EncodeToString(idPub)
 
 	bestHash, bestHeight, err := r.server.cc.chainIO.GetBestBlock()
 	if err != nil {
@@ -1113,9 +1114,22 @@ func (r *rpcServer) GetInfo(ctx context.Context,
 		activeChains[i] = chain.String()
 	}
 
+	// Check if external IP addresses were provided to lnd and use them
+	// to set the URIs.
+	nodeAnn, err := r.server.genNodeAnnouncement(false)
+	if err != nil {
+		return nil, fmt.Errorf("unable to retrieve current fully signed "+
+			"node announcement: %v", err)
+	}
+	addrs := nodeAnn.Addresses
+	uris := make([]string, len(addrs))
+	for i, addr := range addrs {
+		uris[i] = fmt.Sprintf("%s@%s", encodedIDPub, addr.String())
+	}
+
 	// TODO(roasbeef): add synced height n stuff
 	return &lnrpc.GetInfoResponse{
-		IdentityPubkey:     hex.EncodeToString(idPub),
+		IdentityPubkey:     encodedIDPub,
 		NumPendingChannels: nPendingChannels,
 		NumActiveChannels:  activeChannels,
 		NumPeers:           uint32(len(serverPeers)),
@@ -1124,6 +1138,7 @@ func (r *rpcServer) GetInfo(ctx context.Context,
 		SyncedToChain:      isSynced,
 		Testnet:            activeNetParams.Params == &chaincfg.TestNet3Params,
 		Chains:             activeChains,
+		Uris:               uris,
 	}, nil
 }
 
@@ -1257,7 +1272,7 @@ func (r *rpcServer) ChannelBalance(ctx context.Context,
 // workflow and is waiting for confirmations for the funding txn, or is in the
 // process of closure, either initiated cooperatively or non-cooperatively.
 func (r *rpcServer) PendingChannels(ctx context.Context,
-	in *lnrpc.PendingChannelRequest) (*lnrpc.PendingChannelResponse, error) {
+	in *lnrpc.PendingChannelsRequest) (*lnrpc.PendingChannelsResponse, error) {
 
 	// Check macaroon to see if this is allowed.
 	if r.authSvc != nil {
@@ -1267,14 +1282,9 @@ func (r *rpcServer) PendingChannels(ctx context.Context,
 		}
 	}
 
-	_, bestHeight, err := r.server.cc.chainIO.GetBestBlock()
-	if err != nil {
-		return nil, err
-	}
-
 	rpcsLog.Debugf("[pendingchannels]")
 
-	resp := &lnrpc.PendingChannelResponse{}
+	resp := &lnrpc.PendingChannelsResponse{}
 
 	// First, we'll populate the response with all the channels that are
 	// soon to be opened. We can easily fetch this data from the database
@@ -1283,7 +1293,7 @@ func (r *rpcServer) PendingChannels(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	resp.PendingOpenChannels = make([]*lnrpc.PendingChannelResponse_PendingOpenChannel,
+	resp.PendingOpenChannels = make([]*lnrpc.PendingChannelsResponse_PendingOpenChannel,
 		len(pendingOpenChannels))
 	for i, pendingChan := range pendingOpenChannels {
 		pub := pendingChan.IdentityPub.SerializeCompressed()
@@ -1300,20 +1310,17 @@ func (r *rpcServer) PendingChannels(ctx context.Context,
 		commitBaseWeight := blockchain.GetTransactionWeight(utx)
 		commitWeight := commitBaseWeight + lnwallet.WitnessCommitmentTxWeight
 
-		targetConfHeight := pendingChan.FundingBroadcastHeight + uint32(pendingChan.NumConfsRequired)
-		blocksTillOpen := int32(targetConfHeight) - bestHeight
-		resp.PendingOpenChannels[i] = &lnrpc.PendingChannelResponse_PendingOpenChannel{
-			Channel: &lnrpc.PendingChannelResponse_PendingChannel{
+		resp.PendingOpenChannels[i] = &lnrpc.PendingChannelsResponse_PendingOpenChannel{
+			Channel: &lnrpc.PendingChannelsResponse_PendingChannel{
 				RemoteNodePub: hex.EncodeToString(pub),
 				ChannelPoint:  pendingChan.FundingOutpoint.String(),
 				Capacity:      int64(pendingChan.Capacity),
 				LocalBalance:  int64(localCommitment.LocalBalance.ToSatoshis()),
 				RemoteBalance: int64(localCommitment.RemoteBalance.ToSatoshis()),
 			},
-			CommitWeight:   commitWeight,
-			CommitFee:      int64(localCommitment.CommitFee),
-			FeePerKw:       int64(localCommitment.FeePerKw),
-			BlocksTillOpen: blocksTillOpen,
+			CommitWeight: commitWeight,
+			CommitFee:    int64(localCommitment.CommitFee),
+			FeePerKw:     int64(localCommitment.FeePerKw),
 			// TODO(roasbeef): need to track confirmation height
 		}
 	}
@@ -1334,7 +1341,7 @@ func (r *rpcServer) PendingChannels(ctx context.Context,
 		// needed regardless of how this channel was closed.
 		pub := pendingClose.RemotePub.SerializeCompressed()
 		chanPoint := pendingClose.ChanPoint
-		channel := &lnrpc.PendingChannelResponse_PendingChannel{
+		channel := &lnrpc.PendingChannelsResponse_PendingChannel{
 			RemoteNodePub: hex.EncodeToString(pub),
 			ChannelPoint:  chanPoint.String(),
 			Capacity:      int64(pendingClose.Capacity),
@@ -1350,7 +1357,7 @@ func (r *rpcServer) PendingChannels(ctx context.Context,
 		case channeldb.CooperativeClose:
 			resp.PendingClosingChannels = append(
 				resp.PendingClosingChannels,
-				&lnrpc.PendingChannelResponse_ClosedChannel{
+				&lnrpc.PendingChannelsResponse_ClosedChannel{
 					Channel:     channel,
 					ClosingTxid: closeTXID,
 				},
@@ -1361,7 +1368,7 @@ func (r *rpcServer) PendingChannels(ctx context.Context,
 		// If the channel was force closed, then we'll need to query
 		// the utxoNursery for additional information.
 		case channeldb.ForceClose:
-			forceClose := &lnrpc.PendingChannelResponse_ForceClosedChannel{
+			forceClose := &lnrpc.PendingChannelsResponse_ForceClosedChannel{
 				Channel:     channel,
 				ClosingTxid: closeTXID,
 			}
@@ -2272,7 +2279,7 @@ func (r *rpcServer) ListInvoices(ctx context.Context,
 	}, nil
 }
 
-// SubscribeInvoices returns a uni-directional stream (sever -> client) for
+// SubscribeInvoices returns a uni-directional stream (server -> client) for
 // notifying the client of newly added/settled invoices.
 func (r *rpcServer) SubscribeInvoices(req *lnrpc.InvoiceSubscription,
 	updateStream lnrpc.Lightning_SubscribeInvoicesServer) error {
@@ -3023,20 +3030,6 @@ func (r *rpcServer) DeleteAllPayments(ctx context.Context,
 	}
 
 	return &lnrpc.DeleteAllPaymentsResponse{}, nil
-}
-
-// SetAlias...
-func (r *rpcServer) SetAlias(ctx context.Context,
-	_ *lnrpc.SetAliasRequest) (*lnrpc.SetAliasResponse, error) {
-
-	if r.authSvc != nil {
-		if err := macaroons.ValidateMacaroon(ctx, "setalias",
-			r.authSvc); err != nil {
-			return nil, err
-		}
-	}
-
-	return nil, nil
 }
 
 // DebugLevel allows a caller to programmatically set the logging verbosity of
