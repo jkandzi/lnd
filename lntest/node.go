@@ -18,7 +18,7 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	macaroon "gopkg.in/macaroon.v1"
+	macaroon "gopkg.in/macaroon.v2"
 
 	"github.com/go-errors/errors"
 	"github.com/lightningnetwork/lnd/lnrpc"
@@ -36,16 +36,23 @@ var (
 	// defaultNodePort is the initial p2p port which will be used by the
 	// first created lightning node to listen on for incoming p2p
 	// connections.  Subsequent allocated ports for future lighting nodes
-	// instances will be monotonically increasing odd numbers calculated as
-	// such: defaultP2pPort + (2 * harness.nodeNum).
+	// instances will be monotonically increasing numbers calculated as
+	// such: defaultP2pPort + (3 * harness.nodeNum).
 	defaultNodePort = 19555
 
 	// defaultClientPort is the initial rpc port which will be used by the
 	// first created lightning node to listen on for incoming rpc
 	// connections. Subsequent allocated ports for future rpc harness
-	// instances will be monotonically increasing even numbers calculated
-	// as such: defaultP2pPort + (2 * harness.nodeNum).
+	// instances will be monotonically increasing numbers calculated
+	// as such: defaultP2pPort + (3 * harness.nodeNum).
 	defaultClientPort = 19556
+
+	// defaultRestPort is the initial rest port which will be used by the
+	// first created lightning node to listen on for incoming rest
+	// connections. Subsequent allocated ports for future rpc harness
+	// instances will be monotonically increasing numbers calculated
+	// as such: defaultP2pPort + (3 * harness.nodeNum).
+	defaultRestPort = 19557
 
 	// logOutput is a flag that can be set to append the output from the
 	// seed nodes to log files.
@@ -57,22 +64,24 @@ var (
 	trickleDelay = 50
 )
 
-// generateListeningPorts returns two strings representing ports to listen on
+// generateListeningPorts returns three ints representing ports to listen on
 // designated for the current lightning network test. If there haven't been any
 // test instances created, the default ports are used. Otherwise, in order to
-// support multiple test nodes running at once, the p2p and rpc port are
-// incremented after each initialization.
-func generateListeningPorts() (int, int) {
-	var p2p, rpc int
+// support multiple test nodes running at once, the p2p, rpc, and rest ports
+// are incremented after each initialization.
+func generateListeningPorts() (int, int, int) {
+	var p2p, rpc, rest int
 	if numActiveNodes == 0 {
 		p2p = defaultNodePort
 		rpc = defaultClientPort
+		rest = defaultRestPort
 	} else {
-		p2p = defaultNodePort + (2 * numActiveNodes)
-		rpc = defaultClientPort + (2 * numActiveNodes)
+		p2p = defaultNodePort + (3 * numActiveNodes)
+		rpc = defaultClientPort + (3 * numActiveNodes)
+		rest = defaultRestPort + (3 * numActiveNodes)
 	}
 
-	return p2p, rpc
+	return p2p, rpc, rest
 }
 
 type nodeConfig struct {
@@ -89,6 +98,7 @@ type nodeConfig struct {
 	ReadMacPath  string
 	P2PPort      int
 	RPCPort      int
+	RESTPort     int
 }
 
 func (cfg nodeConfig) P2PAddr() string {
@@ -99,8 +109,12 @@ func (cfg nodeConfig) RPCAddr() string {
 	return net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.RPCPort))
 }
 
+func (cfg nodeConfig) RESTAddr() string {
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.RESTPort))
+}
+
 func (cfg nodeConfig) DBPath() string {
-	return filepath.Join(cfg.DataDir, cfg.NetParams.Name, "bitcoin/channel.db")
+	return filepath.Join(cfg.DataDir, "graph", "simnet/channel.db")
 }
 
 // genArgs generates a slice of command line arguments from the lightning node
@@ -122,13 +136,15 @@ func (cfg nodeConfig) genArgs() []string {
 	args = append(args, "--nobootstrap")
 	args = append(args, "--noencryptwallet")
 	args = append(args, "--debuglevel=debug")
-	args = append(args, "--defaultchanconfs=1")
-	args = append(args, fmt.Sprintf("--bitcoin.rpchost=%v", cfg.RPCConfig.Host))
-	args = append(args, fmt.Sprintf("--bitcoin.rpcuser=%v", cfg.RPCConfig.User))
-	args = append(args, fmt.Sprintf("--bitcoin.rpcpass=%v", cfg.RPCConfig.Pass))
-	args = append(args, fmt.Sprintf("--bitcoin.rawrpccert=%v", encodedCert))
-	args = append(args, fmt.Sprintf("--rpcport=%v", cfg.RPCPort))
-	args = append(args, fmt.Sprintf("--peerport=%v", cfg.P2PPort))
+	args = append(args, "--bitcoin.defaultchanconfs=1")
+	args = append(args, "--bitcoin.defaultremotedelay=4")
+	args = append(args, fmt.Sprintf("--btcd.rpchost=%v", cfg.RPCConfig.Host))
+	args = append(args, fmt.Sprintf("--btcd.rpcuser=%v", cfg.RPCConfig.User))
+	args = append(args, fmt.Sprintf("--btcd.rpcpass=%v", cfg.RPCConfig.Pass))
+	args = append(args, fmt.Sprintf("--btcd.rawrpccert=%v", encodedCert))
+	args = append(args, fmt.Sprintf("--rpclisten=%v", cfg.RPCAddr()))
+	args = append(args, fmt.Sprintf("--restlisten=%v", cfg.RESTAddr()))
+	args = append(args, fmt.Sprintf("--listen=%v", cfg.P2PAddr()))
 	args = append(args, fmt.Sprintf("--logdir=%v", cfg.LogDir))
 	args = append(args, fmt.Sprintf("--datadir=%v", cfg.DataDir))
 	args = append(args, fmt.Sprintf("--tlscertpath=%v", cfg.TLSCertPath))
@@ -163,6 +179,7 @@ type HarnessNode struct {
 
 	cmd     *exec.Cmd
 	pidFile string
+	logFile *os.File
 
 	// processExit is a channel that's closed once it's detected that the
 	// process this instance of HarnessNode is bound to has exited.
@@ -195,7 +212,7 @@ func newNode(cfg nodeConfig) (*HarnessNode, error) {
 	cfg.AdminMacPath = filepath.Join(cfg.DataDir, "admin.macaroon")
 	cfg.ReadMacPath = filepath.Join(cfg.DataDir, "readonly.macaroon")
 
-	cfg.P2PPort, cfg.RPCPort = generateListeningPorts()
+	cfg.P2PPort, cfg.RPCPort, cfg.RESTPort = generateListeningPorts()
 
 	nodeNum := numActiveNodes
 	numActiveNodes++
@@ -231,10 +248,10 @@ func (hn *HarnessNode) start(lndError chan<- error) error {
 	// If the logoutput flag is passed, redirect output from the nodes to
 	// log files.
 	if *logOutput {
-		logFile := fmt.Sprintf("output%d.log", hn.NodeID)
+		fileName := fmt.Sprintf("output%d.log", hn.NodeID)
 
 		// Create file if not exists, otherwise append.
-		file, err := os.OpenFile(logFile,
+		file, err := os.OpenFile(fileName,
 			os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
 		if err != nil {
 			return err
@@ -246,6 +263,10 @@ func (hn *HarnessNode) start(lndError chan<- error) error {
 
 		// Pass the node's stdout only to the file.
 		hn.cmd.Stdout = file
+
+		// Let the node keep a reference to this file, such
+		// that we can add to it if necessary.
+		hn.logFile = file
 	}
 
 	if err := hn.cmd.Start(); err != nil {
@@ -301,6 +322,19 @@ func (hn *HarnessNode) start(lndError chan<- error) error {
 	hn.wg.Add(1)
 	go hn.lightningNetworkWatcher()
 
+	return nil
+}
+
+// AddToLog adds a line of choice to the node's logfile. This is useful
+// to interleave test output with output from the node.
+func (hn *HarnessNode) AddToLog(line string) error {
+	// If this node was not set up with a log file, just return early.
+	if hn.logFile == nil {
+		return nil
+	}
+	if _, err := hn.logFile.WriteString(line); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -416,6 +450,29 @@ type chanWatchRequest struct {
 	eventChan chan struct{}
 }
 
+// getChanPointFundingTxid returns the given channel point's funding txid in
+// raw bytes.
+func getChanPointFundingTxid(chanPoint *lnrpc.ChannelPoint) ([]byte, error) {
+	var txid []byte
+
+	// A channel point's funding txid can be get/set as a byte slice or a
+	// string. In the case it is a string, decode it.
+	switch chanPoint.GetFundingTxid().(type) {
+	case *lnrpc.ChannelPoint_FundingTxidBytes:
+		txid = chanPoint.GetFundingTxidBytes()
+	case *lnrpc.ChannelPoint_FundingTxidStr:
+		s := chanPoint.GetFundingTxidStr()
+		h, err := chainhash.NewHashFromStr(s)
+		if err != nil {
+			return nil, err
+		}
+
+		txid = h[:]
+	}
+
+	return txid, nil
+}
+
 // lightningNetworkWatcher is a goroutine which is able to dispatch
 // notifications once it has been observed that a target channel has been
 // closed or opened within the network. In order to dispatch these
@@ -476,7 +533,8 @@ func (hn *HarnessNode) lightningNetworkWatcher() {
 			// For each new channel, we'll increment the number of
 			// edges seen by one.
 			for _, newChan := range graphUpdate.ChannelUpdates {
-				txid, _ := chainhash.NewHash(newChan.ChanPoint.FundingTxid)
+				txidHash, _ := getChanPointFundingTxid(newChan.ChanPoint)
+				txid, _ := chainhash.NewHash(txidHash)
 				op := wire.OutPoint{
 					Hash:  *txid,
 					Index: newChan.ChanPoint.OutputIndex,
@@ -502,7 +560,8 @@ func (hn *HarnessNode) lightningNetworkWatcher() {
 			// detected a channel closure while lnd was pruning the
 			// channel graph.
 			for _, closedChan := range graphUpdate.ClosedChans {
-				txid, _ := chainhash.NewHash(closedChan.ChanPoint.FundingTxid)
+				txidHash, _ := getChanPointFundingTxid(closedChan.ChanPoint)
+				txid, _ := chainhash.NewHash(txidHash)
 				op := wire.OutPoint{
 					Hash:  *txid,
 					Index: closedChan.ChanPoint.OutputIndex,
@@ -569,7 +628,11 @@ func (hn *HarnessNode) WaitForNetworkChannelOpen(ctx context.Context,
 
 	eventChan := make(chan struct{})
 
-	txid, err := chainhash.NewHash(op.FundingTxid)
+	txidHash, err := getChanPointFundingTxid(op)
+	if err != nil {
+		return err
+	}
+	txid, err := chainhash.NewHash(txidHash)
 	if err != nil {
 		return err
 	}
@@ -600,7 +663,11 @@ func (hn *HarnessNode) WaitForNetworkChannelClose(ctx context.Context,
 
 	eventChan := make(chan struct{})
 
-	txid, err := chainhash.NewHash(op.FundingTxid)
+	txidHash, err := getChanPointFundingTxid(op)
+	if err != nil {
+		return err
+	}
+	txid, err := chainhash.NewHash(txidHash)
 	if err != nil {
 		return err
 	}

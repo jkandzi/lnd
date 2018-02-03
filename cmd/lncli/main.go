@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/macaroon.v1"
+	macaroon "gopkg.in/macaroon.v2"
 
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/macaroons"
@@ -193,7 +193,7 @@ func main() {
 		signMessageCommand,
 		verifyMessageCommand,
 		feeReportCommand,
-		updateFeesCommand,
+		updateChannelPolicyCommand,
 	}
 
 	if err := app.Run(os.Args); err != nil {

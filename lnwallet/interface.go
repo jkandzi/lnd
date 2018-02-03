@@ -207,6 +207,11 @@ type WalletController interface {
 	// Stop signals the wallet for shutdown. Shutdown may entail closing
 	// any active sockets, database handles, stopping goroutines, etc.
 	Stop() error
+
+	// BackEnd returns a name for the wallet's backing chain service,
+	// which could be e.g. btcd, bitcoind, neutrino, or another consensus
+	// service.
+	BackEnd() string
 }
 
 // BlockChainIO is a dedicated source which will be used to obtain queries
@@ -273,13 +278,27 @@ type MessageSigner interface {
 	SignMessage(pubKey *btcec.PublicKey, msg []byte) (*btcec.Signature, error)
 }
 
+// PreimageCache is an interface that represents a global cache for preimages.
+// We'll utilize this cache to communicate the discovery of new preimages
+// across sub-systems.
+type PreimageCache interface {
+	// LookupPreimage attempts to look up a preimage according to its hash.
+	// If found, the preimage is returned along with true for the second
+	// argument. Otherwise, it'll return false.
+	LookupPreimage(hash []byte) ([]byte, bool)
+
+	// AddPreimage attempts to add a new preimage to the global cache. If
+	// successful a nil error will be returned.
+	AddPreimage(preimage []byte) error
+}
+
 // WalletDriver represents a "driver" for a particular concrete
 // WalletController implementation. A driver is identified by a globally unique
 // string identifier along with a 'New()' method which is responsible for
 // initializing a particular WalletController concrete implementation.
 type WalletDriver struct {
-	// WalletType is a string which uniquely identifies the WalletController
-	// that this driver, drives.
+	// WalletType is a string which uniquely identifies the
+	// WalletController that this driver, drives.
 	WalletType string
 
 	// New creates a new instance of a concrete WalletController
@@ -288,6 +307,10 @@ type WalletDriver struct {
 	// initialization flexibility, thereby accommodating several potential
 	// WalletController implementations.
 	New func(args ...interface{}) (WalletController, error)
+
+	// BackEnds returns a list of available chain service drivers for the
+	// wallet driver. This could be e.g. bitcoind, btcd, neutrino, etc.
+	BackEnds func() []string
 }
 
 var (

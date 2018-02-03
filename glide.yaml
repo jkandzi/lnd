@@ -4,7 +4,7 @@ import:
   version: ^1.2.1
 - package: github.com/btcsuite/btclog
   version: 84c8d2346e9fc8c7b947e243b9c24e6df9fd206a
-- package: github.com/btcsuite/go-flags
+- package: github.com/jessevdk/go-flags
 - package: github.com/jrick/logrotate
   version: a93b200c26cbae3bb09dd0dc2c7c7fe1468a034a
 - package: github.com/davecgh/go-spew
@@ -24,6 +24,8 @@ import:
   - txscript
   - wire
   - connmgr
+- package: github.com/lightninglabs/gozmq
+  version: 0d266ba6d55ea65c18c7a02d8992c89355149e80
 - package: github.com/roasbeef/btcrpcclient
   version: d0f4db8b4dad0ca3d569b804f21247c3dd96acbb
 - package: github.com/roasbeef/btcutil
@@ -34,7 +36,7 @@ import:
   - hdkeychain
   - txsort
 - package: github.com/roasbeef/btcwallet
-  version: 3037a033935cca719ba3c472870e7d080443a82f
+  version: 4f4765c3e3baf4c7b40c311340a076ec83c5ef3a
   subpackages:
   - chain
   - waddrmgr
@@ -71,9 +73,9 @@ import:
   subpackages:
   - chaincfg
 - package: github.com/lightninglabs/neutrino
-  version: 5560001600544391c68e02bd1cc7cdbd25318030
-- package: gopkg.in/macaroon.v1
-- package: gopkg.in/macaroon-bakery.v1
+  version: 6c8f30a130bb170348ceb754ce4204156efe2741
+- package: gopkg.in/macaroon.v2
+- package: gopkg.in/macaroon-bakery.v2
 - package: github.com/juju/loggo
 - package: github.com/rogpeppe/fastuuid
 - package: gopkg.in/errgo.v1

@@ -17,8 +17,10 @@ import (
 	"github.com/lightningnetwork/lnd/autopilot"
 	"github.com/lightningnetwork/lnd/brontide"
 	"github.com/lightningnetwork/lnd/channeldb"
+	"github.com/lightningnetwork/lnd/contractcourt"
 	"github.com/lightningnetwork/lnd/discovery"
 	"github.com/lightningnetwork/lnd/lnrpc"
+	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/lightningnetwork/lnd/routing"
 	"github.com/roasbeef/btcd/blockchain"
@@ -62,7 +64,7 @@ type server struct {
 	// long-term identity private key.
 	lightningID [32]byte
 
-	mu         sync.Mutex
+	mu         sync.RWMutex
 	peersByID  map[int32]*peer
 	peersByPub map[string]*peer
 
@@ -86,8 +88,12 @@ type server struct {
 
 	chanDB *channeldb.DB
 
-	htlcSwitch    *htlcswitch.Switch
-	invoices      *invoiceRegistry
+	htlcSwitch *htlcswitch.Switch
+
+	invoices *invoiceRegistry
+
+	witnessBeacon contractcourt.WitnessBeacon
+
 	breachArbiter *breachArbiter
 
 	chanRouter *routing.ChannelRouter
@@ -95,6 +101,8 @@ type server struct {
 	authGossiper *discovery.AuthenticatedGossiper
 
 	utxoNursery *utxoNursery
+
+	chainArb *contractcourt.ChainArbitrator
 
 	sphinx *htlcswitch.OnionProcessor
 
@@ -162,6 +170,12 @@ func newServer(listenAddrs []string, chanDB *channeldb.DB, cc *chainControl,
 		quit: make(chan struct{}),
 	}
 
+	s.witnessBeacon = &preimageBeacon{
+		invoices:    s.invoices,
+		wCache:      chanDB.NewWitnessCache(),
+		subscribers: make(map[uint64]*preimageSubcriber),
+	}
+
 	// If the debug HTLC flag is on, then we invoice a "master debug"
 	// invoice which all outgoing payments will be sent and all incoming
 	// HTLCs with the debug R-Hash immediately settled.
@@ -220,14 +234,19 @@ func newServer(listenAddrs []string, chanDB *channeldb.DB, cc *chainControl,
 
 	chanGraph := chanDB.ChannelGraph()
 
-	defaultColor := color.RGBA{ // #3399FF
-		R: 51,
-		G: 153,
-		B: 255,
+	// Parse node color from configuration.
+	color, err := parseHexColor(cfg.Color)
+	if err != nil {
+		srvrLog.Errorf("unable to parse color: %v\n", err)
+		return nil, err
 	}
 
-	// TODO(roasbeef): make alias configurable
-	alias, err := lnwire.NewNodeAlias(hex.EncodeToString(serializedPubKey[:10]))
+	// If no alias is provided, default to first 10 characters of public key
+	alias := cfg.Alias
+	if alias == "" {
+		alias = hex.EncodeToString(serializedPubKey[:10])
+	}
+	nodeAlias, err := lnwire.NewNodeAlias(alias)
 	if err != nil {
 		return nil, err
 	}
@@ -236,9 +255,9 @@ func newServer(listenAddrs []string, chanDB *channeldb.DB, cc *chainControl,
 		LastUpdate:           time.Now(),
 		Addresses:            selfAddrs,
 		PubKey:               privKey.PubKey(),
-		Alias:                alias.String(),
+		Alias:                nodeAlias.String(),
 		Features:             s.globalFeatures,
-		Color:                defaultColor,
+		Color:                color,
 	}
 
 	// If our information has changed since our last boot, then we'll
@@ -250,9 +269,9 @@ func newServer(listenAddrs []string, chanDB *channeldb.DB, cc *chainControl,
 		Timestamp: uint32(selfNode.LastUpdate.Unix()),
 		Addresses: selfNode.Addresses,
 		NodeID:    selfNode.PubKey,
-		Alias:     alias,
+		Alias:     nodeAlias,
 		Features:  selfNode.Features.RawFeatureVector,
-		RGBColor:  defaultColor,
+		RGBColor:  color,
 	}
 	selfNode.AuthSig, err = discovery.SignAnnouncement(s.nodeSigner,
 		s.identityPriv.PubKey(), nodeAnn,
@@ -343,6 +362,59 @@ func newServer(listenAddrs []string, chanDB *channeldb.DB, cc *chainControl,
 		s.htlcSwitch.CloseLink(chanPoint, closureType, 0)
 	}
 
+	s.chainArb = contractcourt.NewChainArbitrator(contractcourt.ChainArbitratorConfig{
+		ChainHash: *activeNetParams.GenesisHash,
+		// TODO(roasbeef): properly configure
+		//  * needs to be << or specified final hop time delta
+		BroadcastDelta: defaultBroadcastDelta,
+		NewSweepAddr: func() ([]byte, error) {
+			return newSweepPkScript(cc.wallet)
+		},
+		PublishTx: cc.wallet.PublishTransaction,
+		DeliverResolutionMsg: func(msgs ...contractcourt.ResolutionMsg) error {
+			for _, msg := range msgs {
+				err := s.htlcSwitch.ProcessContractResolution(msg)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		IncubateOutputs: func(chanPoint wire.OutPoint,
+			commitRes *lnwallet.CommitOutputResolution,
+			outHtlcRes *lnwallet.OutgoingHtlcResolution,
+			inHtlcRes *lnwallet.IncomingHtlcResolution) error {
+
+			var (
+				inRes  []lnwallet.IncomingHtlcResolution
+				outRes []lnwallet.OutgoingHtlcResolution
+			)
+			if inHtlcRes != nil {
+				inRes = append(inRes, *inHtlcRes)
+			}
+			if outHtlcRes != nil {
+				outRes = append(outRes, *outHtlcRes)
+			}
+
+			return s.utxoNursery.IncubateOutputs(
+				chanPoint, commitRes, outRes, inRes,
+			)
+		},
+		PreimageDB:   s.witnessBeacon,
+		Notifier:     cc.chainNotifier,
+		Signer:       cc.wallet.Cfg.Signer,
+		FeeEstimator: cc.feeEstimator,
+		ChainIO:      cc.chainIO,
+		MarkLinkInactive: func(chanPoint wire.OutPoint) error {
+			chanID := lnwire.NewChanIDFromOutPoint(&chanPoint)
+			return s.htlcSwitch.RemoveLink(chanID)
+		},
+		IsOurAddress: func(addr btcutil.Address) bool {
+			_, err := cc.wallet.GetPrivKey(addr)
+			return err == nil
+		},
+	}, chanDB)
+
 	s.breachArbiter = newBreachArbiter(&BreachConfig{
 		CloseLink: closeLink,
 		DB:        chanDB,
@@ -352,8 +424,14 @@ func newServer(listenAddrs []string, chanDB *channeldb.DB, cc *chainControl,
 		},
 		Notifier:           cc.chainNotifier,
 		PublishTransaction: cc.wallet.PublishTransaction,
-		Signer:             cc.wallet.Cfg.Signer,
-		Store:              newRetributionStore(chanDB),
+		SubscribeChannelEvents: func(chanPoint wire.OutPoint) (*contractcourt.ChainEventSubscription, error) {
+			// We'll request a sync dispatch to ensure that the channel
+			// is only marked as closed *after* we update our internal
+			// state.
+			return s.chainArb.SubscribeChannelEvents(chanPoint, true)
+		},
+		Signer: cc.wallet.Cfg.Signer,
+		Store:  newRetributionStore(chanDB),
 	})
 
 	// Create the connection manager which will be responsible for
@@ -403,6 +481,9 @@ func (s *server) Start() error {
 		return err
 	}
 	if err := s.utxoNursery.Start(); err != nil {
+		return err
+	}
+	if err := s.chainArb.Start(); err != nil {
 		return err
 	}
 	if err := s.breachArbiter.Start(); err != nil {
@@ -461,6 +542,7 @@ func (s *server) Stop() error {
 	s.utxoNursery.Stop()
 	s.breachArbiter.Stop()
 	s.authGossiper.Stop()
+	s.chainArb.Stop()
 	s.cc.wallet.Shutdown()
 	s.cc.chainView.Stop()
 	s.connMgr.Stop()
@@ -601,9 +683,9 @@ func (s *server) peerBootstrapper(numTargetPeers uint32,
 		case <-sampleTicker.C:
 			// Obtain the current number of peers, so we can gauge
 			// if we need to sample more peers or not.
-			s.mu.Lock()
+			s.mu.RLock()
 			numActivePeers := uint32(len(s.peersByPub))
-			s.mu.Unlock()
+			s.mu.RUnlock()
 
 			// If we have enough peers, then we can loop back
 			// around to the next round as we're done here.
@@ -647,13 +729,13 @@ func (s *server) peerBootstrapper(numTargetPeers uint32,
 			// With the number of peers we need calculated, we'll
 			// query the network bootstrappers to sample a set of
 			// random addrs for us.
-			s.mu.Lock()
+			s.mu.RLock()
 			ignoreList := make(map[autopilot.NodeID]struct{})
 			for _, peer := range s.peersByPub {
 				nID := autopilot.NewNodeID(peer.addr.IdentityKey)
 				ignoreList[nID] = struct{}{}
 			}
-			s.mu.Unlock()
+			s.mu.RUnlock()
 
 			peerAddrs, err := discovery.MultiSourceBootstrap(
 				ignoreList, numNeeded*2, bootStrappers...,
@@ -819,6 +901,11 @@ func (s *server) establishPersistentConnections() error {
 		return err
 	}
 
+	// Acquire and hold server lock until all persistent connection requests
+	// have been recorded and sent to the connection manager.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// Iterate through the combined list of addresses from prior links and
 	// node announcements and attempt to reconnect to each node.
 	for pubStr, nodeAddr := range nodeAddrsMap {
@@ -862,8 +949,8 @@ func (s *server) establishPersistentConnections() error {
 func (s *server) BroadcastMessage(skip map[routing.Vertex]struct{},
 	msgs ...lnwire.Message) error {
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	return s.broadcastMessages(skip, msgs)
 }
@@ -913,10 +1000,30 @@ func (s *server) broadcastMessages(
 func (s *server) SendToPeer(target *btcec.PublicKey,
 	msgs ...lnwire.Message) error {
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// Queue the incoming messages in the peer's outgoing message buffer.
+	// We acquire the shared lock here to ensure the peer map doesn't change
+	// from underneath us.
+	s.mu.RLock()
+	targetPeer, errChans, err := s.sendToPeer(target, msgs)
+	s.mu.RUnlock()
+	if err != nil {
+		return err
+	}
 
-	return s.sendToPeer(target, msgs)
+	// With the server's shared lock released, we now handle all of the
+	// errors being returned from the target peer's write handler.
+	for _, errChan := range errChans {
+		select {
+		case err := <-errChan:
+			return err
+		case <-targetPeer.quit:
+			return fmt.Errorf("peer shutting down")
+		case <-s.quit:
+			return ErrServerShuttingDown
+		}
+	}
+
+	return nil
 }
 
 // NotifyWhenOnline can be called by other subsystems to get notified when a
@@ -946,10 +1053,12 @@ func (s *server) NotifyWhenOnline(peer *btcec.PublicKey,
 		s.peerConnectedListeners[pubStr], connectedChan)
 }
 
-// sendToPeer is an internal method that delivers messages to the specified
-// `target` peer.
+// sendToPeer is an internal method that queues the given messages in the
+// outgoing buffer of the specified `target` peer. Upon success, this method
+// returns the peer instance and a slice of error chans that will contain
+// responses from the write handler.
 func (s *server) sendToPeer(target *btcec.PublicKey,
-	msgs []lnwire.Message) error {
+	msgs []lnwire.Message) (*peer, []chan error, error) {
 
 	// Compute the target peer's identifier.
 	targetPubBytes := target.SerializeCompressed()
@@ -965,23 +1074,14 @@ func (s *server) sendToPeer(target *btcec.PublicKey,
 	if err == ErrPeerNotFound {
 		srvrLog.Errorf("unable to send message to %x, "+
 			"peer not found", targetPubBytes)
-		return err
+		return nil, nil, err
 	}
 
-	// Send messages to the peer and return any error from
-	// sending a message.
+	// Send messages to the peer and return the error channels that will be
+	// signaled by the peer's write handler.
 	errChans := s.sendPeerMessages(targetPeer, msgs, nil)
-	for _, errChan := range errChans {
-		select {
-		case err := <-errChan:
-			return err
-		case <-targetPeer.quit:
-			return fmt.Errorf("peer shutting down")
-		case <-s.quit:
-			return ErrServerShuttingDown
-		}
-	}
-	return nil
+
+	return targetPeer, errChans, nil
 }
 
 // sendPeerMessages enqueues a list of messages into the outgoingQueue of the
@@ -1032,8 +1132,8 @@ func (s *server) sendPeerMessages(
 //
 // NOTE: This function is safe for concurrent access.
 func (s *server) FindPeer(peerKey *btcec.PublicKey) (*peer, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	pubStr := string(peerKey.SerializeCompressed())
 
@@ -1046,8 +1146,8 @@ func (s *server) FindPeer(peerKey *btcec.PublicKey) (*peer, error) {
 //
 // NOTE: This function is safe for concurrent access.
 func (s *server) FindPeerByPubStr(pubStr string) (*peer, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	return s.findPeerByPubStr(pubStr)
 }
@@ -1495,6 +1595,8 @@ type openChanReq struct {
 
 	private bool
 
+	minHtlc lnwire.MilliSatoshi
+
 	// TODO(roasbeef): add ability to specify channel constraints as well
 
 	updates chan *lnrpc.OpenStatusUpdate
@@ -1612,6 +1714,7 @@ func (s *server) DisconnectPeer(pubKey *btcec.PublicKey) error {
 // NOTE: This function is safe for concurrent access.
 func (s *server) OpenChannel(peerID int32, nodeKey *btcec.PublicKey,
 	localAmt btcutil.Amount, pushAmt lnwire.MilliSatoshi,
+	minHtlc lnwire.MilliSatoshi,
 	fundingFeePerByte btcutil.Amount,
 	private bool) (chan *lnrpc.OpenStatusUpdate, chan error) {
 
@@ -1633,13 +1736,13 @@ func (s *server) OpenChannel(peerID int32, nodeKey *btcec.PublicKey,
 
 	// First attempt to locate the target peer to open a channel with, if
 	// we're unable to locate the peer then this request will fail.
-	s.mu.Lock()
+	s.mu.RLock()
 	if peer, ok := s.peersByID[peerID]; ok {
 		targetPeer = peer
 	} else if peer, ok := s.peersByPub[string(pubKeyBytes)]; ok {
 		targetPeer = peer
 	}
-	s.mu.Unlock()
+	s.mu.RUnlock()
 
 	if targetPeer == nil {
 		errChan <- fmt.Errorf("unable to find peer nodeID(%x), "+
@@ -1674,6 +1777,7 @@ func (s *server) OpenChannel(peerID int32, nodeKey *btcec.PublicKey,
 		fundingFeePerWeight: fundingFeePerWeight,
 		pushAmt:             pushAmt,
 		private:             private,
+		minHtlc:             minHtlc,
 		updates:             updateChan,
 		err:                 errChan,
 	}
@@ -1689,8 +1793,8 @@ func (s *server) OpenChannel(peerID int32, nodeKey *btcec.PublicKey,
 //
 // NOTE: This function is safe for concurrent access.
 func (s *server) Peers() []*peer {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	peers := make([]*peer, 0, len(s.peersByID))
 	for _, peer := range s.peersByID {
@@ -1698,4 +1802,22 @@ func (s *server) Peers() []*peer {
 	}
 
 	return peers
+}
+
+// parseHexColor takes a hex string representation of a color in the
+// form "#RRGGBB", parses the hex color values, and returns a color.RGBA
+// struct of the same color.
+func parseHexColor(colorStr string) (color.RGBA, error) {
+	if len(colorStr) != 7 || colorStr[0] != '#' {
+		return color.RGBA{}, errors.New("Color must be in format #RRGGBB")
+	}
+
+	// Decode the hex color string to bytes.
+	// The resulting byte array is in the form [R, G, B].
+	colorBytes, err := hex.DecodeString(colorStr[1:])
+	if err != nil {
+		return color.RGBA{}, err
+	}
+
+	return color.RGBA{R: colorBytes[0], G: colorBytes[1], B: colorBytes[2]}, nil
 }

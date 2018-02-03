@@ -16,6 +16,7 @@ import (
 	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/lightningnetwork/lnd/multimutex"
 	"github.com/lightningnetwork/lnd/routing"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
@@ -42,13 +43,13 @@ type networkMsg struct {
 	err chan error
 }
 
-// feeUpdateRequest is a request that is sent to the server when a caller
-// wishes to update the fees for a particular set of channels. New UpdateFee
-// messages will be crafted to be sent out during the next broadcast epoch and
-// the fee updates committed to the lower layer.
-type feeUpdateRequest struct {
+// chanPolicyUpdateRequest is a request that is sent to the server when a caller
+// wishes to update the channel policy (fees e.g.) for a particular set of
+// channels. New ChannelUpdate messages will be crafted to be sent out during
+// the next broadcast epoch and the fee updates committed to the lower layer.
+type chanPolicyUpdateRequest struct {
 	targetChans []wire.OutPoint
-	newSchema   routing.FeeSchema
+	newSchema   routing.ChannelPolicy
 
 	errResp chan error
 }
@@ -175,9 +176,9 @@ type AuthenticatedGossiper struct {
 	// networkHandler.
 	networkMsgs chan *networkMsg
 
-	// feeUpdates is a channel that requests to update the fee schedule of
-	// a set of channels is sent over.
-	feeUpdates chan *feeUpdateRequest
+	// chanPolicyUpdates is a channel that requests to update the forwarding
+	// policy of a set of channels is sent over.
+	chanPolicyUpdates chan *chanPolicyUpdateRequest
 
 	// bestHeight is the height of the block at the tip of the main chain
 	// as we know it.
@@ -185,6 +186,12 @@ type AuthenticatedGossiper struct {
 
 	// selfKey is the identity public key of the backing Lighting node.
 	selfKey *btcec.PublicKey
+
+	// channelMtx is used to restrict the database access to one
+	// goroutine per channel ID. This is done to ensure that when
+	// the gossiper is handling an announcement, the db state stays
+	// consistent between when the DB is first read to it's written.
+	channelMtx *multimutex.Mutex
 
 	sync.Mutex
 }
@@ -202,10 +209,11 @@ func New(cfg Config, selfKey *btcec.PublicKey) (*AuthenticatedGossiper, error) {
 		cfg:                     &cfg,
 		networkMsgs:             make(chan *networkMsg),
 		quit:                    make(chan struct{}),
-		feeUpdates:              make(chan *feeUpdateRequest),
+		chanPolicyUpdates:       make(chan *chanPolicyUpdateRequest),
 		prematureAnnouncements:  make(map[uint32][]*networkMsg),
 		prematureChannelUpdates: make(map[uint64][]*networkMsg),
 		waitingProofs:           storage,
+		channelMtx:              multimutex.NewMutex(),
 	}, nil
 }
 
@@ -224,16 +232,35 @@ func (d *AuthenticatedGossiper) SynchronizeNode(pub *btcec.PublicKey) error {
 	// containing all the messages to be sent to the target peer.
 	var announceMessages []lnwire.Message
 
+	makeNodeAnn := func(n *channeldb.LightningNode) *lnwire.NodeAnnouncement {
+		alias, _ := lnwire.NewNodeAlias(n.Alias)
+		return &lnwire.NodeAnnouncement{
+			Signature: n.AuthSig,
+			Timestamp: uint32(n.LastUpdate.Unix()),
+			Addresses: n.Addresses,
+			NodeID:    n.PubKey,
+			Features:  n.Features.RawFeatureVector,
+			RGBColor:  n.Color,
+			Alias:     alias,
+		}
+	}
+
 	// As peers are expecting channel announcements before node
 	// announcements, we first retrieve the initial announcement, as well as
 	// the latest channel update announcement for both of the directed edges
 	// that make up each channel, and queue these to be sent to the peer.
-	var numEdges uint32
+	var (
+		numEdges uint32
+		numNodes uint32
+	)
 	if err := d.cfg.Router.ForEachChannel(func(chanInfo *channeldb.ChannelEdgeInfo,
 		e1, e2 *channeldb.ChannelEdgePolicy) error {
+
 		// First, using the parameters of the channel, along with the
 		// channel authentication proof, we'll create re-create the
-		// original authenticated channel announcement.
+		// original authenticated channel announcement. If the channel
+		// also has known validated nodes, then we'll send that as
+		// well.
 		if chanInfo.AuthProof != nil {
 			chanAnn, e1Ann, e2Ann := createChanAnnouncement(
 				chanInfo.AuthProof, chanInfo, e1, e2)
@@ -241,9 +268,29 @@ func (d *AuthenticatedGossiper) SynchronizeNode(pub *btcec.PublicKey) error {
 			announceMessages = append(announceMessages, chanAnn)
 			if e1Ann != nil {
 				announceMessages = append(announceMessages, e1Ann)
+
+				// If this edge has a validated node
+				// announcement, then we'll send that as well.
+				if e1.Node.HaveNodeAnnouncement {
+					nodeAnn := makeNodeAnn(e1.Node)
+					announceMessages = append(
+						announceMessages, nodeAnn,
+					)
+					numNodes++
+				}
 			}
 			if e2Ann != nil {
 				announceMessages = append(announceMessages, e2Ann)
+
+				// If this edge has a validated node
+				// announcement, then we'll send that as well.
+				if e2.Node.HaveNodeAnnouncement {
+					nodeAnn := makeNodeAnn(e2.Node)
+					announceMessages = append(
+						announceMessages, nodeAnn,
+					)
+					numNodes++
+				}
 			}
 
 			numEdges++
@@ -252,38 +299,6 @@ func (d *AuthenticatedGossiper) SynchronizeNode(pub *btcec.PublicKey) error {
 		return nil
 	}); err != nil && err != channeldb.ErrGraphNoEdgesFound {
 		log.Errorf("unable to sync infos with peer: %v", err)
-		return err
-	}
-
-	// Run through all the vertexes in the graph, retrieving the data for
-	// the node announcements we originally retrieved.
-	var numNodes uint32
-	if err := d.cfg.Router.ForEachNode(func(node *channeldb.LightningNode) error {
-		// If this is a node we never received a node announcement for,
-		// we skip it.
-		if !node.HaveNodeAnnouncement {
-			return nil
-		}
-
-		alias, err := lnwire.NewNodeAlias(node.Alias)
-		if err != nil {
-			return err
-		}
-		ann := &lnwire.NodeAnnouncement{
-			Signature: node.AuthSig,
-			Timestamp: uint32(node.LastUpdate.Unix()),
-			Addresses: node.Addresses,
-			NodeID:    node.PubKey,
-			Alias:     alias,
-			Features:  node.Features.RawFeatureVector,
-			RGBColor:  node.Color,
-		}
-		announceMessages = append(announceMessages, ann)
-
-		numNodes++
-
-		return nil
-	}); err != nil {
 		return err
 	}
 
@@ -296,24 +311,24 @@ func (d *AuthenticatedGossiper) SynchronizeNode(pub *btcec.PublicKey) error {
 	return d.cfg.SendToPeer(pub, announceMessages...)
 }
 
-// PropagateFeeUpdate signals the AuthenticatedGossiper to update the fee
-// schema for the specified channels. If no channels are specified, then the
-// fee update will be applied to all outgoing channels from the source node.
-// Fee updates are done in two stages: first, the AuthenticatedGossiper ensures
-// the updated has been committed by dependant sub-systems, then it signs and
-// broadcasts new updates to the network.
-func (d *AuthenticatedGossiper) PropagateFeeUpdate(newSchema routing.FeeSchema,
-	chanPoints ...wire.OutPoint) error {
+// PropagateChanPolicyUpdate signals the AuthenticatedGossiper to update the
+// channel forwarding policies for the specified channels. If no channels are
+// specified, then the update will be applied to all outgoing channels from the
+// source node. Policy updates are done in two stages: first, the
+// AuthenticatedGossiper ensures the update has been committed by dependant
+// sub-systems, then it signs and broadcasts new updates to the network.
+func (d *AuthenticatedGossiper) PropagateChanPolicyUpdate(
+	newSchema routing.ChannelPolicy, chanPoints ...wire.OutPoint) error {
 
 	errChan := make(chan error, 1)
-	feeUpdate := &feeUpdateRequest{
+	policyUpdate := &chanPolicyUpdateRequest{
 		targetChans: chanPoints,
 		newSchema:   newSchema,
 		errResp:     errChan,
 	}
 
 	select {
-	case d.feeUpdates <- feeUpdate:
+	case d.chanPolicyUpdates <- policyUpdate:
 		return <-errChan
 	case <-d.quit:
 		return fmt.Errorf("AuthenticatedGossiper shutting down")
@@ -818,22 +833,23 @@ func (d *AuthenticatedGossiper) networkHandler() {
 	// We'll use this validation to ensure that we process jobs in their
 	// dependency order during parallel validation.
 	validationBarrier := routing.NewValidationBarrier(
-		runtime.NumCPU()*10, d.quit,
+		runtime.NumCPU()*4, d.quit,
 	)
 
 	for {
 		select {
-		// A new fee update has arrived. We'll commit it to the
+		// A new policy update has arrived. We'll commit it to the
 		// sub-systems below us, then craft, sign, and broadcast a new
 		// ChannelUpdate for the set of affected clients.
-		case feeUpdate := <-d.feeUpdates:
+		case policyUpdate := <-d.chanPolicyUpdates:
 			// First, we'll now create new fully signed updates for
 			// the affected channels and also update the underlying
 			// graph with the new state.
-			newChanUpdates, err := d.processFeeChanUpdate(feeUpdate)
+			newChanUpdates, err := d.processChanPolicyUpdate(policyUpdate)
 			if err != nil {
-				log.Errorf("Unable to craft fee updates: %v", err)
-				feeUpdate.errResp <- err
+				log.Errorf("Unable to craft policy updates: %v",
+					err)
+				policyUpdate.errResp <- err
 				continue
 			}
 
@@ -842,7 +858,7 @@ func (d *AuthenticatedGossiper) networkHandler() {
 			// start of the next epoch.
 			announcements.AddMsgs(newChanUpdates...)
 
-			feeUpdate.errResp <- nil
+			policyUpdate.errResp <- nil
 
 		case announcement := <-d.networkMsgs:
 			// Channel annoucnement signatures are the only message
@@ -964,11 +980,6 @@ func (d *AuthenticatedGossiper) networkHandler() {
 				}
 			}
 
-			// If we're able to broadcast the current batch
-			// successfully, then we reset the batch for a new
-			// round of announcements.
-			announcements.Reset()
-
 		// The retransmission timer has ticked which indicates that we
 		// should check if we need to prune or re-broadcast any of our
 		// personal channels. This addresses the case of "zombie" channels and
@@ -988,7 +999,7 @@ func (d *AuthenticatedGossiper) networkHandler() {
 	}
 }
 
-// retransmitStaleChannels eaxmines all outgoing channels that the source node
+// retransmitStaleChannels examines all outgoing channels that the source node
 // is known to maintain to check to see if any of them are "stale". A channel
 // is stale iff, the last timestamp of it's rebroadcast is older then
 // broadcastInterval.
@@ -1004,14 +1015,14 @@ func (d *AuthenticatedGossiper) retransmitStaleChannels() error {
 		info *channeldb.ChannelEdgeInfo,
 		edge *channeldb.ChannelEdgePolicy) error {
 
-		// If there's no auth proof attaced to this edge, it
-		// means that it is a private channel not meant to be
-		// announced to the greater network, so avoid sending
-		// channel updates for this channel to not leak its
+		// If there's no auth proof attached to this edge, it means
+		// that it is a private channel not meant to be announced to
+		// the greater network, so avoid sending channel updates for
+		// this channel to not leak its
 		// existence.
 		if info.AuthProof == nil {
 			log.Debugf("Skipping retransmission of channel "+
-				"without AuthProof: %v", info)
+				"without AuthProof: %v", info.ChannelID)
 			return nil
 		}
 
@@ -1072,18 +1083,19 @@ func (d *AuthenticatedGossiper) retransmitStaleChannels() error {
 	return nil
 }
 
-// processFeeChanUpdate generates a new set of channel updates with the new fee
-// schema applied for each specified channel identified by its channel point.
-// In the case that no channel points are specified, then the fee update will
+// processChanPolicyUpdate generates a new set of channel updates with the new
+// channel policy applied for each specified channel identified by its channel
+// point. In the case that no channel points are specified, then the update will
 // be applied to all channels. Finally, the backing ChannelGraphSource is
-// updated with the latest information reflecting the applied fee updates.
+// updated with the latest information reflecting the applied updates.
 //
 // TODO(roasbeef): generalize into generic for any channel update
-func (d *AuthenticatedGossiper) processFeeChanUpdate(feeUpdate *feeUpdateRequest) ([]networkMsg, error) {
+func (d *AuthenticatedGossiper) processChanPolicyUpdate(
+	policyUpdate *chanPolicyUpdateRequest) ([]networkMsg, error) {
 	// First, we'll construct a set of all the channels that need to be
 	// updated.
 	chansToUpdate := make(map[wire.OutPoint]struct{})
-	for _, chanPoint := range feeUpdate.targetChans {
+	for _, chanPoint := range policyUpdate.targetChans {
 		chansToUpdate[chanPoint] = struct{}{}
 	}
 
@@ -1104,10 +1116,13 @@ func (d *AuthenticatedGossiper) processFeeChanUpdate(feeUpdate *feeUpdateRequest
 		}
 
 		// Apply the new fee schema to the edge.
-		edge.FeeBaseMSat = feeUpdate.newSchema.BaseFee
+		edge.FeeBaseMSat = policyUpdate.newSchema.BaseFee
 		edge.FeeProportionalMillionths = lnwire.MilliSatoshi(
-			feeUpdate.newSchema.FeeRate,
+			policyUpdate.newSchema.FeeRate,
 		)
+
+		// Apply the new TimeLockDelta.
+		edge.TimeLockDelta = uint16(policyUpdate.newSchema.TimeLockDelta)
 
 		// Re-sign and update the backing ChannelGraphSource, and
 		// retrieve our ChannelUpdate to broadcast.
@@ -1364,6 +1379,14 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(nMsg *networkMsg) []n
 		// present in this channel are not present in the database, a
 		// partial node will be added to represent each node while we
 		// wait for a node announcement.
+		//
+		// Before we add the edge to the database, we obtain
+		// the mutex for this channel ID. We do this to ensure
+		// no other goroutine has read the database and is now
+		// making decisions based on this DB state, before it
+		// writes to the DB.
+		d.channelMtx.Lock(msg.ShortChannelID.ToUint64())
+		defer d.channelMtx.Unlock(msg.ShortChannelID.ToUint64())
 		if err := d.cfg.Router.AddEdge(edge); err != nil {
 			// If the edge was rejected due to already being known,
 			// then it may be that case that this new message has a
@@ -1504,6 +1527,13 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(nMsg *networkMsg) []n
 		// Get the node pub key as far as we don't have it in channel
 		// update announcement message. We'll need this to properly
 		// verify message signature.
+		//
+		// We make sure to obtain the mutex for this channel ID
+		// before we acces the database. This ensures the state
+		// we read from the database has not changed between this
+		// point and when we call UpdateEdge() later.
+		d.channelMtx.Lock(msg.ShortChannelID.ToUint64())
+		defer d.channelMtx.Unlock(msg.ShortChannelID.ToUint64())
 		chanInfo, _, _, err := d.cfg.Router.GetChannelByID(msg.ShortChannelID)
 		if err != nil {
 			switch err {
@@ -1667,6 +1697,12 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(nMsg *networkMsg) []n
 
 		// Ensure that we know of a channel with the target channel ID
 		// before proceeding further.
+		//
+		// We must acquire the mutex for this channel ID before getting
+		// the channel from the database, to ensure what we read does
+		// not change before we call AddProof() later.
+		d.channelMtx.Lock(msg.ShortChannelID.ToUint64())
+		defer d.channelMtx.Unlock(msg.ShortChannelID.ToUint64())
 		chanInfo, e1, e2, err := d.cfg.Router.GetChannelByID(
 			msg.ShortChannelID)
 		if err != nil {
@@ -1981,12 +2017,18 @@ func (d *AuthenticatedGossiper) sendAnnSigReliably(
 func (d *AuthenticatedGossiper) updateChannel(info *channeldb.ChannelEdgeInfo,
 	edge *channeldb.ChannelEdgePolicy) (*lnwire.ChannelAnnouncement, *lnwire.ChannelUpdate, error) {
 
-	edge.LastUpdate = time.Now()
+	// Make sure timestamp is always increased, such that our update
+	// gets propagated.
+	timestamp := time.Now().Unix()
+	if timestamp <= edge.LastUpdate.Unix() {
+		timestamp = edge.LastUpdate.Unix() + 1
+	}
+	edge.LastUpdate = time.Unix(timestamp, 0)
 	chanUpdate := &lnwire.ChannelUpdate{
 		Signature:       edge.Signature,
 		ChainHash:       info.ChainHash,
 		ShortChannelID:  lnwire.NewShortChanIDFromInt(edge.ChannelID),
-		Timestamp:       uint32(edge.LastUpdate.Unix()),
+		Timestamp:       uint32(timestamp),
 		Flags:           edge.Flags,
 		TimeLockDelta:   edge.TimeLockDelta,
 		HtlcMinimumMsat: edge.MinHTLC,

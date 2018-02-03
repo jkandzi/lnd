@@ -431,6 +431,11 @@ var openChannelCommand = cli.Command{
 				"must be explicitly told about it to be able " +
 				"to route through it",
 		},
+		cli.Int64Flag{
+			Name: "min_htlc_msat",
+			Usage: "(optional) the minimum value we will require " +
+				"for incoming HTLCs on the channel",
+		},
 	},
 	Action: actionDecorator(openChannel),
 }
@@ -456,8 +461,9 @@ func openChannel(ctx *cli.Context) error {
 	}
 
 	req := &lnrpc.OpenChannelRequest{
-		TargetConf: int32(ctx.Int64("conf_target")),
-		SatPerByte: ctx.Int64("sat_per_byte"),
+		TargetConf:  int32(ctx.Int64("conf_target")),
+		SatPerByte:  ctx.Int64("sat_per_byte"),
+		MinHtlcMsat: ctx.Int64("min_htlc_msat"),
 	}
 
 	switch {
@@ -537,7 +543,25 @@ func openChannel(ctx *cli.Context) error {
 
 		case *lnrpc.OpenStatusUpdate_ChanOpen:
 			channelPoint := update.ChanOpen.ChannelPoint
-			txid, err := chainhash.NewHash(channelPoint.FundingTxid)
+
+			// A channel point's funding txid can be get/set as a
+			// byte slice or a string. In the case it is a string,
+			// decode it.
+			var txidHash []byte
+			switch channelPoint.GetFundingTxid().(type) {
+			case *lnrpc.ChannelPoint_FundingTxidBytes:
+				txidHash = channelPoint.GetFundingTxidBytes()
+			case *lnrpc.ChannelPoint_FundingTxidStr:
+				s := channelPoint.GetFundingTxidStr()
+				h, err := chainhash.NewHashFromStr(s)
+				if err != nil {
+					return err
+				}
+
+				txidHash = h[:]
+			}
+
+			txid, err := chainhash.NewHash(txidHash)
 			if err != nil {
 				return err
 			}
@@ -647,11 +671,9 @@ func closeChannel(ctx *cli.Context) error {
 		return fmt.Errorf("funding txid argument missing")
 	}
 
-	txidhash, err := chainhash.NewHashFromStr(txid)
-	if err != nil {
-		return err
+	req.ChannelPoint.FundingTxid = &lnrpc.ChannelPoint_FundingTxidStr{
+		FundingTxidStr: txid,
 	}
-	req.ChannelPoint.FundingTxid = txidhash[:]
 
 	switch {
 	case ctx.IsSet("output_index"):
@@ -945,8 +967,28 @@ func listChannels(ctx *cli.Context) error {
 var sendPaymentCommand = cli.Command{
 	Name:  "sendpayment",
 	Usage: "send a payment over lightning",
-	ArgsUsage: "(destination amount payment_hash " +
-		"| --pay_req=[payment request])",
+	Description: `
+	Send a payment over Lightning. One can either specify the full
+	parameters of the payment, or just use a payment request which encodes
+	all the payment details.
+
+	If payment isn't manually specified, then only a payment request needs
+	to be passed using the --pay_req argument.
+
+	If the payment *is* manually specified, then all four alternative
+	arguments need to be specified in order to complete the payment:
+	    * --dest=N
+	    * --amt=A
+	    * --final_cltv_delta=T
+	    * --payment_hash=H
+
+	The --debug_send flag is provided for usage *purely* in test
+	environments. If specified, then the payment hash isn't required, as
+	it'll use the hash of all zeroes. This mode allows one to quickly test
+	payment connectivity without having to create an invoice at the
+	destination.
+	`,
+	ArgsUsage: "dest amt payment_hash final_cltv_delta | --pay_req=[payment request]",
 	Flags: []cli.Flag{
 		cli.StringFlag{
 			Name: "dest, d",
@@ -969,6 +1011,10 @@ var sendPaymentCommand = cli.Command{
 			Name:  "pay_req",
 			Usage: "a zpay32 encoded payment request to fulfill",
 		},
+		cli.Int64Flag{
+			Name:  "final_cltv_delta",
+			Usage: "the number of blocks the last hop has to reveal the preimage",
+		},
 	},
 	Action: sendPayment,
 }
@@ -984,6 +1030,7 @@ func sendPayment(ctx *cli.Context) error {
 	if ctx.IsSet("pay_req") {
 		req = &lnrpc.SendRequest{
 			PaymentRequest: ctx.String("pay_req"),
+			Amt:            ctx.Int64("amt"),
 		}
 	} else {
 		args := ctx.Args()
@@ -1049,6 +1096,17 @@ func sendPayment(ctx *cli.Context) error {
 					"bytes, is instead %v", len(rHash))
 			}
 			req.PaymentHash = rHash
+
+			switch {
+			case ctx.IsSet("final_cltv_delta"):
+				req.FinalCltvDelta = int32(ctx.Int64("final_cltv_delta"))
+			case args.Present():
+				delta, err := strconv.ParseInt(args.First(), 10, 64)
+				if err != nil {
+					return err
+				}
+				req.FinalCltvDelta = int32(delta)
+			}
 		}
 	}
 
@@ -1097,6 +1155,11 @@ var payInvoiceCommand = cli.Command{
 			Name:  "pay_req",
 			Usage: "a zpay32 encoded payment request to fulfill",
 		},
+		cli.Int64Flag{
+			Name: "amt",
+			Usage: "(optional) number of satoshis to fulfill the " +
+				"invoice",
+		},
 	},
 	Action: actionDecorator(payInvoice),
 }
@@ -1117,6 +1180,7 @@ func payInvoice(ctx *cli.Context) error {
 
 	req := &lnrpc.SendRequest{
 		PaymentRequest: payReq,
+		Amt:            ctx.Int64("amt"),
 	}
 
 	return sendPaymentRequest(ctx, req)
@@ -1127,9 +1191,10 @@ var addInvoiceCommand = cli.Command{
 	Usage: "add a new invoice.",
 	Description: `
 	Add a new invoice, expressing intent for a future payment.
-	
-	The value of the invoice in satoshis is necessary for the creation, 
-	the remaining parameters are optional.`,
+
+	Invoices without an amount can be created by not supplying any
+	parameters or providing an amount of 0. These invoices allow the payee
+	to specify the amount of satoshis they wish to send.`,
 	ArgsUsage: "value preimage",
 	Flags: []cli.Flag{
 		cli.StringFlag{
@@ -1149,8 +1214,8 @@ var addInvoiceCommand = cli.Command{
 				"created.",
 		},
 		cli.Int64Flag{
-			Name:  "value",
-			Usage: "the value of this invoice in satoshis",
+			Name:  "amt",
+			Usage: "the amt of satoshis in this invoice",
 		},
 		cli.StringFlag{
 			Name: "description_hash",
@@ -1180,7 +1245,7 @@ func addInvoice(ctx *cli.Context) error {
 		preimage []byte
 		descHash []byte
 		receipt  []byte
-		value    int64
+		amt      int64
 		err      error
 	)
 
@@ -1190,16 +1255,14 @@ func addInvoice(ctx *cli.Context) error {
 	args := ctx.Args()
 
 	switch {
-	case ctx.IsSet("value"):
-		value = ctx.Int64("value")
+	case ctx.IsSet("amt"):
+		amt = ctx.Int64("amt")
 	case args.Present():
-		value, err = strconv.ParseInt(args.First(), 10, 64)
+		amt, err = strconv.ParseInt(args.First(), 10, 64)
 		args = args.Tail()
 		if err != nil {
-			return fmt.Errorf("unable to decode value argument: %v", err)
+			return fmt.Errorf("unable to decode amt argument: %v", err)
 		}
-	default:
-		return fmt.Errorf("value argument missing")
 	}
 
 	switch {
@@ -1227,7 +1290,7 @@ func addInvoice(ctx *cli.Context) error {
 		Memo:            ctx.String("memo"),
 		Receipt:         receipt,
 		RPreimage:       preimage,
-		Value:           value,
+		Value:           amt,
 		DescriptionHash: descHash,
 		FallbackAddr:    ctx.String("fallback_addr"),
 		Expiry:          ctx.Int64("expiry"),
@@ -1968,9 +2031,9 @@ func verifyMessage(ctx *cli.Context) error {
 var feeReportCommand = cli.Command{
 	Name:  "feereport",
 	Usage: "display the current fee policies of all active channels",
-	Description: `
-	Returns the current fee policies of all active channels. 
-	Fee policies can be updated using the updateFees command.`,
+	Description: ` 
+	Returns the current fee policies of all active channels.
+	Fee policies can be updated using the updatechanpolicy command.`,
 	Action: actionDecorator(feeReport),
 }
 
@@ -1989,13 +2052,13 @@ func feeReport(ctx *cli.Context) error {
 	return nil
 }
 
-var updateFeesCommand = cli.Command{
-	Name:      "updatefees",
-	Usage:     "update the fee policy for all channels, or a single channel",
-	ArgsUsage: "base_fee_msat fee_rate [channel_point]",
+var updateChannelPolicyCommand = cli.Command{
+	Name:      "updatechanpolicy",
+	Usage:     "update the channel policy for all channels, or a single channel",
+	ArgsUsage: "base_fee_msat fee_rate time_lock_delta [channel_point]",
 	Description: `
-	Updates the fee policy for all channels, or just a particular channel 
-	identified by it's channel point. The fee update will be committed, and 
+	Updates the channel policy for all channels, or just a particular channel
+	identified by its channel point. The update will be committed, and
 	broadcast to the rest of the network within the next batch.
 	Channel points are encoded as: funding_txid:output_index`,
 	Flags: []cli.Flag{
@@ -2011,6 +2074,11 @@ var updateFeesCommand = cli.Command{
 				"proportionally based on the value of each " +
 				"forwarded HTLC, the lowest possible rate is 0.000001",
 		},
+		cli.Int64Flag{
+			Name: "time_lock_delta",
+			Usage: "the CLTV delta that will be applied to all " +
+				"forwarded HTLCs",
+		},
 		cli.StringFlag{
 			Name: "chan_point",
 			Usage: "The channel whose fee policy should be " +
@@ -2018,18 +2086,19 @@ var updateFeesCommand = cli.Command{
 				"will be updated. Takes the form of: txid:output_index",
 		},
 	},
-	Action: actionDecorator(updateFees),
+	Action: actionDecorator(updateChannelPolicy),
 }
 
-func updateFees(ctx *cli.Context) error {
+func updateChannelPolicy(ctx *cli.Context) error {
 	ctxb := context.Background()
 	client, cleanUp := getClient(ctx)
 	defer cleanUp()
 
 	var (
-		baseFee int64
-		feeRate float64
-		err     error
+		baseFee       int64
+		feeRate       float64
+		timeLockDelta int64
+		err           error
 	)
 	args := ctx.Args()
 
@@ -2060,10 +2129,26 @@ func updateFees(ctx *cli.Context) error {
 		return fmt.Errorf("fee_rate argument missing")
 	}
 
+	switch {
+	case ctx.IsSet("time_lock_delta"):
+		timeLockDelta = ctx.Int64("time_lock_delta")
+	case args.Present():
+		timeLockDelta, err = strconv.ParseInt(args.First(), 10, 64)
+		if err != nil {
+			return fmt.Errorf("unable to decode time_lock_delta: %v",
+				err)
+		}
+
+		args = args.Tail()
+	default:
+		return fmt.Errorf("time_lock_delta argument missing")
+	}
+
 	var (
 		chanPoint    *lnrpc.ChannelPoint
 		chanPointStr string
 	)
+
 	switch {
 	case ctx.IsSet("chan_point"):
 		chanPointStr = ctx.String("chan_point")
@@ -2078,37 +2163,36 @@ func updateFees(ctx *cli.Context) error {
 				"txid:index")
 		}
 
-		txHash, err := chainhash.NewHashFromStr(split[0])
-		if err != nil {
-			return err
-		}
 		index, err := strconv.ParseInt(split[1], 10, 32)
 		if err != nil {
 			return fmt.Errorf("unable to decode output index: %v", err)
 		}
 
 		chanPoint = &lnrpc.ChannelPoint{
-			FundingTxid: txHash[:],
+			FundingTxid: &lnrpc.ChannelPoint_FundingTxidStr{
+				FundingTxidStr: split[0],
+			},
 			OutputIndex: uint32(index),
 		}
 	}
 
-	req := &lnrpc.FeeUpdateRequest{
-		BaseFeeMsat: baseFee,
-		FeeRate:     feeRate,
+	req := &lnrpc.PolicyUpdateRequest{
+		BaseFeeMsat:   baseFee,
+		FeeRate:       feeRate,
+		TimeLockDelta: uint32(timeLockDelta),
 	}
 
 	if chanPoint != nil {
-		req.Scope = &lnrpc.FeeUpdateRequest_ChanPoint{
+		req.Scope = &lnrpc.PolicyUpdateRequest_ChanPoint{
 			ChanPoint: chanPoint,
 		}
 	} else {
-		req.Scope = &lnrpc.FeeUpdateRequest_Global{
+		req.Scope = &lnrpc.PolicyUpdateRequest_Global{
 			Global: true,
 		}
 	}
 
-	resp, err := client.UpdateFees(ctxb, req)
+	resp, err := client.UpdateChannelPolicy(ctxb, req)
 	if err != nil {
 		return err
 	}
