@@ -5,7 +5,7 @@ import (
 	"os"
 	"runtime"
 
-	flags "github.com/btcsuite/go-flags"
+	flags "github.com/jessevdk/go-flags"
 	"github.com/lightningnetwork/lnd/daemon"
 )
 
