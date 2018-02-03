@@ -16,7 +16,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"path/filepath"
-	"runtime"
 	"runtime/pprof"
 	"sync"
 	"time"
@@ -29,7 +28,6 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	proxy "github.com/grpc-ecosystem/grpc-gateway/runtime"
-	flags "github.com/jessevdk/go-flags"
 	"github.com/lightningnetwork/lnd/autopilot"
 	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/lnrpc"
@@ -104,7 +102,6 @@ func LndMain(appDir string) error {
 	fmt.Println("chain dir:", cfg.Bitcoin.ChainDir)
 	fmt.Println("test net:", cfg.Bitcoin.TestNet3)
 	fmt.Println("sim net:", cfg.Bitcoin.SimNet)
-	fmt.Println("neutrino:", cfg.NeutrinoMode.Active)
 	fmt.Println("connect peers", cfg.NeutrinoMode.ConnectPeers)
 
 	defer func() {
