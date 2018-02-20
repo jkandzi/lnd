@@ -469,7 +469,7 @@ func (s *Switch) handleLocalDispatch(packet *htlcPacket) error {
 
 	// We've just received a settle update which means we can finalize the
 	// user payment and return successful response.
-	case *lnwire.UpdateFufillHTLC:
+	case *lnwire.UpdateFulfillHTLC:
 		// Notify the user that his payment was successfully proceed.
 		payment.err <- nil
 		payment.preimage <- htlc.PaymentPreimage
@@ -652,7 +652,7 @@ func (s *Switch) handlePacketForward(packet *htlcPacket) error {
 	// We've just received a settle packet which means we can finalize the
 	// payment circuit by forwarding the settle msg to the channel from
 	// which htlc add packet was initially received.
-	case *lnwire.UpdateFufillHTLC, *lnwire.UpdateFailHTLC:
+	case *lnwire.UpdateFulfillHTLC, *lnwire.UpdateFailHTLC:
 		if !packet.isRouted {
 			// Use circuit map to find the link to forward settle/fail to.
 			circuit := s.circuits.LookupByHTLC(packet.outgoingChanID,
@@ -835,7 +835,7 @@ func (s *Switch) htlcForwarder() {
 			if resolutionMsg.Failure != nil {
 				pkt.htlc = &lnwire.UpdateFailHTLC{}
 			} else {
-				pkt.htlc = &lnwire.UpdateFufillHTLC{
+				pkt.htlc = &lnwire.UpdateFulfillHTLC{
 					PaymentPreimage: *resolutionMsg.PreImage,
 				}
 			}
@@ -941,6 +941,10 @@ func (s *Switch) htlcForwarder() {
 				links, err := s.getLinks(cmd.peer)
 				cmd.done <- links
 				cmd.err <- err
+			case *updateForwardingIndexCmd:
+				cmd.err <- s.updateShortChanID(
+					cmd.chanID, cmd.shortChanID,
+				)
 			}
 
 		case <-s.quit:
@@ -997,15 +1001,22 @@ func (s *Switch) AddLink(link ChannelLink) error {
 
 	select {
 	case s.linkControl <- command:
-		return <-command.err
+		select {
+		case err := <-command.err:
+			return err
+		case <-s.quit:
+		}
 	case <-s.quit:
-		return errors.New("unable to add link htlc switch was stopped")
 	}
+
+	return errors.New("unable to add link htlc switch was stopped")
 }
 
 // addLink is used to add the newly created channel link and start use it to
 // handle the channel updates.
 func (s *Switch) addLink(link ChannelLink) error {
+	// TODO(roasbeef): reject if link already tehre?
+
 	// First we'll add the link to the linkIndex which lets us quickly look
 	// up a channel when we need to close or register it, and the
 	// forwarding index which'll be used when forwarding HTLC's in the
@@ -1049,12 +1060,26 @@ func (s *Switch) GetLink(chanID lnwire.ChannelID) (ChannelLink, error) {
 		done:   make(chan ChannelLink, 1),
 	}
 
+query:
 	select {
 	case s.linkControl <- command:
-		return <-command.done, <-command.err
+
+		var link ChannelLink
+		select {
+		case link = <-command.done:
+		case <-s.quit:
+			break query
+		}
+
+		select {
+		case err := <-command.err:
+			return link, err
+		case <-s.quit:
+		}
 	case <-s.quit:
-		return nil, errors.New("unable to get link htlc switch was stopped")
 	}
+
+	return nil, errors.New("unable to get link htlc switch was stopped")
 }
 
 // getLink attempts to return the link that has the specified channel ID.
@@ -1095,10 +1120,15 @@ func (s *Switch) RemoveLink(chanID lnwire.ChannelID) error {
 
 	select {
 	case s.linkControl <- command:
-		return <-command.err
+		select {
+		case err := <-command.err:
+			return err
+		case <-s.quit:
+		}
 	case <-s.quit:
-		return errors.New("unable to remove link htlc switch was stopped")
 	}
+
+	return errors.New("unable to remove link htlc switch was stopped")
 }
 
 // removeLink is used to remove and stop the channel link.
@@ -1123,6 +1153,66 @@ func (s *Switch) removeLink(chanID lnwire.ChannelID) error {
 	return nil
 }
 
+// updateForwardingIndexCmd is a command sent by outside sub-systems to update
+// the forwarding index of the switch in the event that the short channel ID of
+// a particular link changes.
+type updateForwardingIndexCmd struct {
+	chanID      lnwire.ChannelID
+	shortChanID lnwire.ShortChannelID
+
+	err chan error
+}
+
+// UpdateShortChanID updates the short chan ID for an existing channel. This is
+// required in the case of a re-org and re-confirmation or a channel, or in the
+// case that a link was added to the switch before its short chan ID was known.
+func (s *Switch) UpdateShortChanID(chanID lnwire.ChannelID,
+	shortChanID lnwire.ShortChannelID) error {
+
+	command := &updateForwardingIndexCmd{
+		chanID:      chanID,
+		shortChanID: shortChanID,
+		err:         make(chan error, 1),
+	}
+
+	select {
+	case s.linkControl <- command:
+		select {
+		case err := <-command.err:
+			return err
+		case <-s.quit:
+		}
+	case <-s.quit:
+	}
+
+	return errors.New("unable to update short chan id htlc switch was stopped")
+}
+
+// updateShortChanID updates the short chan ID of an existing link.
+func (s *Switch) updateShortChanID(chanID lnwire.ChannelID,
+	shortChanID lnwire.ShortChannelID) error {
+
+	// First, we'll extract the current link as is from the link link
+	// index. If the link isn't even in the index, then we'll return an
+	// error.
+	link, ok := s.linkIndex[chanID]
+	if !ok {
+		return fmt.Errorf("link %v not found", chanID)
+	}
+
+	log.Infof("Updating short_chan_id for ChannelLink(%v): old=%v, new=%v",
+		chanID, link.ShortChanID(), shortChanID)
+
+	// At this point the link is actually active, so we'll update the
+	// forwarding index with the next short channel ID.
+	s.forwardingIndex[shortChanID] = link
+
+	// Finally, we'll notify the link of its new short channel ID.
+	link.UpdateShortChanID(shortChanID)
+
+	return nil
+}
+
 // getLinksCmd is a get links command wrapper, it is used to propagate handler
 // parameters and return handler error.
 type getLinksCmd struct {
@@ -1140,12 +1230,26 @@ func (s *Switch) GetLinksByInterface(hop [33]byte) ([]ChannelLink, error) {
 		done: make(chan []ChannelLink, 1),
 	}
 
+query:
 	select {
 	case s.linkControl <- command:
-		return <-command.done, <-command.err
+
+		var links []ChannelLink
+		select {
+		case links = <-command.done:
+		case <-s.quit:
+			break query
+		}
+
+		select {
+		case err := <-command.err:
+			return links, err
+		case <-s.quit:
+		}
 	case <-s.quit:
-		return nil, errors.New("unable to get links htlc switch was stopped")
 	}
+
+	return nil, errors.New("unable to get links htlc switch was stopped")
 }
 
 // getLinks is function which returns the channel links of the peer by hop

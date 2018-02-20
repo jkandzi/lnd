@@ -7,14 +7,16 @@
   * **Go:** `lnd` is written in Go. To install, run one of the following commands:
 
   
-    **Note**: The minimum version of Go supported is Go 1.8.
+    **Note**: The minimum version of Go supported is Go 1.8. We recommend that
+    users use the latest version of Go, which at the time of writing is
+    [`1.10`](https://blog.golang.org/go1.10).
 
     
     On Linux:
     ```
-    sudo apt-get install golang-1.8-go
+    sudo apt-get install golang-1.10-go
     ```
-    > Note that golang-1.8-go puts binaries in /usr/lib/go-1.8/bin. If you want them on your PATH, you need to make that change yourself.
+    > Note that golang-1.10-go puts binaries in /usr/lib/go-1.8/bin. If you want them on your PATH, you need to make that change yourself.
 
     On Mac OS X
     ```
@@ -187,6 +189,16 @@ be configured with `--txindex` just like `btcd` above
 (the latter is optional but allows you to see unconfirmed transactions in your
 wallet). They must be combined in the same ZMQ socket address (e.g. `--zmqpubrawblock=tcp://127.0.0.1:28332` and `--zmqpubrawtx=tcp://127.0.0.1:28332`).
 - Start `bitcoind` running against testnet, and let it complete a full sync with the testnet chain (alternatively, use `--bitcoind.regtest` instead).
+
+Here's a sample `bitcoin.conf` for use with lnd:
+```
+testnet=1
+txindex=1
+server=1
+daemon=1
+zmqpubrawblock=tcp://127.0.0.1:18501
+zmqpubrawtx=tcp://127.0.0.1:18501
+```
 
 Once all of the above is complete, and you've confirmed `bitcoind` is fully updated with the latest blocks on testnet, run the command below to launch `lnd` with `bitcoind` as your backend (as with `bitcoind`, you can create an `lnd.conf` to save these options, more info on that is described further below):
 

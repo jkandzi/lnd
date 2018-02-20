@@ -10,7 +10,7 @@ import (
 // InvoiceDatabase is an interface which represents the persistent subsystem
 // which may search, lookup and settle invoices.
 type InvoiceDatabase interface {
-	// LookupInvoice attempts to look up an invoice according to it's 32
+	// LookupInvoice attempts to look up an invoice according to its 32
 	// byte payment hash.
 	LookupInvoice(chainhash.Hash) (channeldb.Invoice, error)
 
@@ -64,6 +64,12 @@ type ChannelLink interface {
 	// short channel ID encodes the exact location in the main chain that
 	// the original funding output can be found.
 	ShortChanID() lnwire.ShortChannelID
+
+	// UpdateShortChanID updates the short channel ID for a link. This may
+	// be required in the event that a link is created before the short
+	// chan ID for it is known, or a re-org occurs, and the funding
+	// transaction changes location within the chain.
+	UpdateShortChanID(lnwire.ShortChannelID)
 
 	// UpdateForwardingPolicy updates the forwarding policy for the target
 	// ChannelLink. Once updated, the link will use the new forwarding

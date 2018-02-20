@@ -296,7 +296,7 @@ func testDualFundingReservationWorkflow(miner *rpctest.Harness,
 	}
 	aliceChanReservation.SetNumConfsRequired(numReqConfs)
 	aliceChanReservation.CommitConstraints(csvDelay, lnwallet.MaxHTLCNumber/2,
-		lnwire.NewMSatFromSatoshis(fundingAmount), 10)
+		lnwire.NewMSatFromSatoshis(fundingAmount), 1, 10)
 
 	// The channel reservation should now be populated with a multi-sig key
 	// from our HD chain, a change output with 3 BTC, and 2 outputs
@@ -319,7 +319,7 @@ func testDualFundingReservationWorkflow(miner *rpctest.Harness,
 		t.Fatalf("bob unable to init channel reservation: %v", err)
 	}
 	bobChanReservation.CommitConstraints(csvDelay, lnwallet.MaxHTLCNumber/2,
-		lnwire.NewMSatFromSatoshis(fundingAmount), 10)
+		lnwire.NewMSatFromSatoshis(fundingAmount), 1, 10)
 	bobChanReservation.SetNumConfsRequired(numReqConfs)
 
 	assertContributionInitPopulated(t, bobChanReservation.OurContribution())
@@ -503,7 +503,7 @@ func testFundingCancellationNotEnoughFunds(miner *rpctest.Harness,
 		lnwire.FFAnnounceChannel,
 	)
 	if _, ok := err.(*lnwallet.ErrInsufficientFunds); !ok {
-		t.Fatalf("coin selection succeded should have insufficient funds: %v",
+		t.Fatalf("coin selection succeeded should have insufficient funds: %v",
 			err)
 	}
 
@@ -537,7 +537,7 @@ func testFundingCancellationNotEnoughFunds(miner *rpctest.Harness,
 	}
 }
 
-func testCancelNonExistantReservation(miner *rpctest.Harness,
+func testCancelNonExistentReservation(miner *rpctest.Harness,
 	alice, _ *lnwallet.LightningWallet, t *testing.T) {
 
 	feeRate, err := alice.Cfg.FeeEstimator.EstimateFeePerWeight(1)
@@ -574,7 +574,7 @@ func testReservationInitiatorBalanceBelowDustCancel(miner *rpctest.Harness,
 	)
 	switch {
 	case err == nil:
-		t.Fatalf("initialization should've failed due to " +
+		t.Fatalf("initialization should have failed due to " +
 			"insufficient local amount")
 
 	case !strings.Contains(err.Error(), "local output is too small"):
@@ -649,7 +649,7 @@ func testSingleFunderReservationWorkflow(miner *rpctest.Harness,
 	}
 	aliceChanReservation.SetNumConfsRequired(numReqConfs)
 	aliceChanReservation.CommitConstraints(csvDelay, lnwallet.MaxHTLCNumber/2,
-		lnwire.NewMSatFromSatoshis(fundingAmt), 10)
+		lnwire.NewMSatFromSatoshis(fundingAmt), 1, 10)
 
 	// Verify all contribution fields have been set properly.
 	aliceContribution := aliceChanReservation.OurContribution()
@@ -661,7 +661,6 @@ func testSingleFunderReservationWorkflow(miner *rpctest.Harness,
 		t.Fatalf("coin selection failed, should have one change outputs, "+
 			"instead have: %v", len(aliceContribution.ChangeOutputs))
 	}
-	aliceContribution.CsvDelay = csvDelay
 	assertContributionInitPopulated(t, aliceContribution)
 
 	// Next, Bob receives the initial request, generates a corresponding
@@ -673,12 +672,11 @@ func testSingleFunderReservationWorkflow(miner *rpctest.Harness,
 		t.Fatalf("unable to create bob reservation: %v", err)
 	}
 	bobChanReservation.CommitConstraints(csvDelay, lnwallet.MaxHTLCNumber/2,
-		lnwire.NewMSatFromSatoshis(fundingAmt), 10)
+		lnwire.NewMSatFromSatoshis(fundingAmt), 1, 10)
 	bobChanReservation.SetNumConfsRequired(numReqConfs)
 
 	// We'll ensure that Bob's contribution also gets generated properly.
 	bobContribution := bobChanReservation.OurContribution()
-	bobContribution.CsvDelay = csvDelay
 	assertContributionInitPopulated(t, bobContribution)
 
 	// With his contribution generated, he can now process Alice's
@@ -984,7 +982,7 @@ func testListTransactionDetails(miner *rpctest.Harness,
 		}
 
 		// We assert that the value is greater than the amount we
-		// attempted to send, as the wallet should've paid some amount
+		// attempted to send, as the wallet should have paid some amount
 		// of network fees.
 		if txDetail.Value >= -outputAmt {
 			fmt.Println(spew.Sdump(txDetail))
@@ -1477,7 +1475,7 @@ var walletTests = []walletTestCase{
 	},
 	{
 		name: "test cancel non-existent reservation",
-		test: testCancelNonExistantReservation,
+		test: testCancelNonExistentReservation,
 	},
 	{
 		name: "reorg wallet balance",
@@ -1573,7 +1571,7 @@ func waitForWalletSync(r *rpctest.Harness, w *lnwallet.LightningWallet) error {
 }
 
 // TestInterfaces tests all registered interfaces with a unified set of tests
-// which excersie each of the required methods found within the WalletController
+// which exercise each of the required methods found within the WalletController
 // interface.
 //
 // NOTE: In the future, when additional implementations of the WalletController
@@ -1590,7 +1588,7 @@ func TestLightningWallet(t *testing.T) {
 
 	// Initialize the harness around a btcd node which will serve as our
 	// dedicated miner to generate blocks, cause re-orgs, etc. We'll set
-	// up this node with a chain length of 125, so we have plentyyy of BTC
+	// up this node with a chain length of 125, so we have plenty of BTC
 	// to play around with.
 	miningNode, err := rpctest.New(netParams, nil, nil)
 	if err != nil {
@@ -1702,7 +1700,6 @@ func runTests(t *testing.T, walletDriver *lnwallet.WalletDriver,
 				neutrino.Config{
 					DataDir:     tempTestDirAlice,
 					Database:    aliceDB,
-					Namespace:   []byte("alice"),
 					ChainParams: *netParams,
 					ConnectPeers: []string{
 						miningNode.P2PAddress(),
@@ -1728,7 +1725,6 @@ func runTests(t *testing.T, walletDriver *lnwallet.WalletDriver,
 				neutrino.Config{
 					DataDir:     tempTestDirBob,
 					Database:    bobDB,
-					Namespace:   []byte("bob"),
 					ChainParams: *netParams,
 					ConnectPeers: []string{
 						miningNode.P2PAddress(),
