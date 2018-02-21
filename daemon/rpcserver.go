@@ -829,7 +829,7 @@ func (r *rpcServer) OpenChannelSync(ctx context.Context,
 
 	// Creation of channels before the wallet syncs up is currently
 	// disallowed.
-	isSynced, err := r.server.cc.wallet.IsSynced()
+	isSynced, _, err := r.server.cc.wallet.IsSynced()
 	if err != nil {
 		return nil, err
 	}
@@ -1166,7 +1166,7 @@ func (r *rpcServer) GetInfo(ctx context.Context,
 		return nil, fmt.Errorf("unable to get best block info: %v", err)
 	}
 
-	isSynced, err := r.server.cc.wallet.IsSynced()
+	isSynced, bestHeaderTimestamp, err := r.server.cc.wallet.IsSynced()
 	if err != nil {
 		return nil, fmt.Errorf("unable to sync PoV of the wallet "+
 			"with current best block in the main chain: %v", err)
@@ -1192,17 +1192,18 @@ func (r *rpcServer) GetInfo(ctx context.Context,
 
 	// TODO(roasbeef): add synced height n stuff
 	return &lnrpc.GetInfoResponse{
-		IdentityPubkey:     encodedIDPub,
-		NumPendingChannels: nPendingChannels,
-		NumActiveChannels:  activeChannels,
-		NumPeers:           uint32(len(serverPeers)),
-		BlockHeight:        uint32(bestHeight),
-		BlockHash:          bestHash.String(),
-		SyncedToChain:      isSynced,
-		Testnet:            activeNetParams.Params == &chaincfg.TestNet3Params,
-		Chains:             activeChains,
-		Uris:               uris,
-		Alias:              nodeAnn.Alias.String(),
+		IdentityPubkey:      encodedIDPub,
+		NumPendingChannels:  nPendingChannels,
+		NumActiveChannels:   activeChannels,
+		NumPeers:            uint32(len(serverPeers)),
+		BlockHeight:         uint32(bestHeight),
+		BlockHash:           bestHash.String(),
+		SyncedToChain:       isSynced,
+		Testnet:             activeNetParams.Params == &chaincfg.TestNet3Params,
+		Chains:              activeChains,
+		Uris:                uris,
+		Alias:               nodeAnn.Alias.String(),
+		BestHeaderTimestamp: int64(bestHeaderTimestamp),
 	}, nil
 }
 
@@ -1692,7 +1693,8 @@ func (r *rpcServer) SendPayment(paymentStream lnrpc.Lightning_SendPaymentServer)
 				// attempt to decode it, populating the
 				// payment accordingly.
 				if nextPayment.PaymentRequest != "" {
-					payReq, err := zpay32.Decode(nextPayment.PaymentRequest)
+					payReq, err := zpay32.Decode(nextPayment.PaymentRequest,
+						activeNetParams.Params)
 					if err != nil {
 						select {
 						case errChan <- err:
@@ -1881,7 +1883,8 @@ func (r *rpcServer) SendPaymentSync(ctx context.Context,
 	// If the proto request has an encoded payment request, then we we'll
 	// use that solely to dispatch the payment.
 	if nextPayment.PaymentRequest != "" {
-		payReq, err := zpay32.Decode(nextPayment.PaymentRequest)
+		payReq, err := zpay32.Decode(nextPayment.PaymentRequest,
+			activeNetParams.Params)
 		if err != nil {
 			return nil, err
 		}
@@ -2149,7 +2152,7 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 // createRPCInvoice creates an *lnrpc.Invoice from the *channeldb.Invoice.
 func createRPCInvoice(invoice *channeldb.Invoice) (*lnrpc.Invoice, error) {
 	paymentRequest := string(invoice.PaymentRequest)
-	decoded, err := zpay32.Decode(paymentRequest)
+	decoded, err := zpay32.Decode(paymentRequest, activeNetParams.Params)
 	if err != nil {
 		return nil, fmt.Errorf("unable to decode payment request: %v",
 			err)
@@ -2977,7 +2980,7 @@ func (r *rpcServer) DecodePayReq(ctx context.Context,
 	// Fist we'll attempt to decode the payment request string, if the
 	// request is invalid or the checksum doesn't match, then we'll exit
 	// here with an error.
-	payReq, err := zpay32.Decode(req.PayReq)
+	payReq, err := zpay32.Decode(req.PayReq, activeNetParams.Params)
 	if err != nil {
 		return nil, err
 	}
