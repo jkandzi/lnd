@@ -13,6 +13,3 @@ ios_dest="$dir/mobile/build/ios/Lndbindings.framework"
 echo "Building for iOS ($ios_dest)..."
 "$GOPATH/bin/gomobile" bind -target=ios -tags="ios" -v -o "$ios_dest" "$package"
 
-android_dest="$dir/mobile/build/android/Lndbindings.aar"
-echo "Building for Android ($android_dest)..."
-"$GOPATH/bin/gomobile" bind -target=android -tags="android" -v -o "$android_dest" "$package"
