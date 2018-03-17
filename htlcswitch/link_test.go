@@ -16,12 +16,12 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-errors/errors"
-	"github.com/lightningnetwork/lightning-onion"
 	"github.com/lightningnetwork/lnd/chainntnfs"
 	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/contractcourt"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
@@ -1124,8 +1124,8 @@ func TestChannelLinkMultiHopDecodeError(t *testing.T) {
 	defer n.stop()
 
 	// Replace decode function with another which throws an error.
-	n.carolChannelLink.cfg.DecodeOnionObfuscator = func(
-		*sphinx.OnionPacket) (ErrorEncrypter, lnwire.FailCode) {
+	n.carolChannelLink.cfg.ExtractErrorEncrypter = func(
+		*btcec.PublicKey) (ErrorEncrypter, lnwire.FailCode) {
 		return nil, lnwire.CodeInvalidOnionVersion
 	}
 
@@ -1472,7 +1472,7 @@ func newSingleLinkTestHarness(chanAmt, chanReserve btcutil.Amount) (
 		Circuits:           aliceSwitch.CircuitModifier(),
 		ForwardPackets:     aliceSwitch.ForwardPackets,
 		DecodeHopIterators: decoder.DecodeHopIterators,
-		DecodeOnionObfuscator: func(*sphinx.OnionPacket) (
+		ExtractErrorEncrypter: func(*btcec.PublicKey) (
 			ErrorEncrypter, lnwire.FailCode) {
 			return obfuscator, lnwire.CodeNone
 		},
@@ -1538,7 +1538,7 @@ func handleStateUpdate(link *channelLink,
 	var msg lnwire.Message
 	select {
 	case msg = <-sentMsgs:
-	case <-time.After(20 * time.Second):
+	case <-time.After(60 * time.Second):
 		return fmt.Errorf("did not receive CommitSig from Alice")
 	}
 
@@ -1575,7 +1575,7 @@ func handleStateUpdate(link *channelLink,
 	// This should make the link respond with a revocation.
 	select {
 	case msg = <-sentMsgs:
-	case <-time.After(20 * time.Second):
+	case <-time.After(60 * time.Second):
 		return fmt.Errorf("did not receive RevokeAndAck from Alice")
 	}
 
@@ -1628,7 +1628,7 @@ func updateState(batchTick chan time.Time, link *channelLink,
 	var msg lnwire.Message
 	select {
 	case msg = <-sentMsgs:
-	case <-time.After(20 * time.Second):
+	case <-time.After(60 * time.Second):
 		return fmt.Errorf("did not receive RevokeAndAck from Alice")
 	}
 
@@ -1644,7 +1644,7 @@ func updateState(batchTick chan time.Time, link *channelLink,
 	}
 	select {
 	case msg = <-sentMsgs:
-	case <-time.After(20 * time.Second):
+	case <-time.After(60 * time.Second):
 		return fmt.Errorf("did not receive CommitSig from Alice")
 	}
 
@@ -1761,7 +1761,7 @@ func TestChannelLinkBandwidthConsistency(t *testing.T) {
 	var msg lnwire.Message
 	select {
 	case msg = <-aliceMsgs:
-	case <-time.After(2 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatalf("did not receive message")
 	}
 
@@ -1839,7 +1839,7 @@ func TestChannelLinkBandwidthConsistency(t *testing.T) {
 	// Alice will send the HTLC to Bob.
 	select {
 	case msg = <-aliceMsgs:
-	case <-time.After(2 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatalf("did not receive message")
 	}
 
@@ -1975,7 +1975,7 @@ func TestChannelLinkBandwidthConsistency(t *testing.T) {
 
 	select {
 	case msg = <-aliceMsgs:
-	case <-time.After(2 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatalf("did not receive message")
 	}
 
@@ -2076,7 +2076,7 @@ func TestChannelLinkBandwidthConsistency(t *testing.T) {
 	// Message should be sent to Bob.
 	select {
 	case msg = <-aliceMsgs:
-	case <-time.After(2 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatalf("did not receive message")
 	}
 	failMsg, ok = msg.(*lnwire.UpdateFailHTLC)
@@ -2172,7 +2172,7 @@ func TestChannelLinkBandwidthConsistencyOverflow(t *testing.T) {
 	for i := 0; i < numHTLCs; i++ {
 		select {
 		case msg = <-aliceMsgs:
-		case <-time.After(5 * time.Second):
+		case <-time.After(15 * time.Second):
 			t.Fatalf("did not receive message %d", i)
 		}
 
@@ -2281,7 +2281,7 @@ func TestChannelLinkBandwidthConsistencyOverflow(t *testing.T) {
 		var msg lnwire.Message
 		select {
 		case msg = <-aliceMsgs:
-		case <-time.After(2 * time.Second):
+		case <-time.After(15 * time.Second):
 			t.Fatalf("did not receive message")
 		}
 
@@ -2386,7 +2386,7 @@ func TestChannelLinkBandwidthChanReserve(t *testing.T) {
 	var msg lnwire.Message
 	select {
 	case msg = <-aliceMsgs:
-	case <-time.After(2 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatalf("did not receive message")
 	}
 

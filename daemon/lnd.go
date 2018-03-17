@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/pprof"
+	"strings"
 	"sync"
 	"time"
 
@@ -106,6 +107,26 @@ func LndMain(appDir string) error {
 
 	// Show version at startup.
 	ltndLog.Infof("Version %s", version())
+
+	var network string
+	switch {
+	case cfg.Bitcoin.TestNet3 || cfg.Litecoin.TestNet3:
+		network = "testnet"
+
+	case cfg.Bitcoin.MainNet || cfg.Litecoin.MainNet:
+		network = "mainnet"
+
+	case cfg.Bitcoin.SimNet:
+		network = "simmnet"
+
+	case cfg.Bitcoin.RegTest:
+		network = "regtest"
+	}
+
+	ltndLog.Infof("Active chain: %v (network=%v)",
+		strings.Title(registeredChains.PrimaryChain().String()),
+		network,
+	)
 
 	// Enable http profiling server if requested.
 	if cfg.Profile != "" {
@@ -240,6 +261,17 @@ func LndMain(appDir string) error {
 	primaryChain := registeredChains.PrimaryChain()
 	registeredChains.RegisterChain(primaryChain, activeChainControl)
 
+	// Select the configuration and furnding parameters for Bitcoin or
+	// Litecoin, depending on the primary registered chain.
+	chainCfg := cfg.Bitcoin
+	minRemoteDelay := minBtcRemoteDelay
+	maxRemoteDelay := maxBtcRemoteDelay
+	if primaryChain == litecoinChain {
+		chainCfg = cfg.Litecoin
+		minRemoteDelay = minLtcRemoteDelay
+		maxRemoteDelay = maxLtcRemoteDelay
+	}
+
 	// TODO(roasbeef): add rotation
 	idPrivKey, err := activeChainControl.wallet.DerivePrivKey(keychain.KeyDescriptor{
 		KeyLocator: keychain.KeyLocator{
@@ -342,7 +374,7 @@ func LndMain(appDir string) error {
 			// In case the user has explicitly specified
 			// a default value for the number of
 			// confirmations, we use it.
-			defaultConf := uint16(cfg.Bitcoin.DefaultNumChanConfs)
+			defaultConf := uint16(chainCfg.DefaultNumChanConfs)
 			if defaultConf != 0 {
 				return defaultConf
 			}
@@ -375,13 +407,13 @@ func LndMain(appDir string) error {
 			// In case the user has explicitly specified
 			// a default value for the remote delay, we
 			// use it.
-			defaultDelay := uint16(cfg.Bitcoin.DefaultRemoteDelay)
+			defaultDelay := uint16(chainCfg.DefaultRemoteDelay)
 			if defaultDelay > 0 {
 				return defaultDelay
 			}
 
 			// If not we scale according to channel size.
-			delay := uint16(maxRemoteDelay *
+			delay := uint16(btcutil.Amount(maxRemoteDelay) *
 				chanAmt / maxFundingAmount)
 			if delay < minRemoteDelay {
 				delay = minRemoteDelay
@@ -416,6 +448,8 @@ func LndMain(appDir string) error {
 			// channel bandwidth.
 			return uint16(lnwallet.MaxHTLCNumber / 2)
 		},
+		ZombieSweeperInterval: 1 * time.Minute,
+		ReservationTimeout:    10 * time.Minute,
 	})
 	if err != nil {
 		return err

@@ -16,7 +16,7 @@
     ```
     sudo apt-get install golang-1.10-go
     ```
-    > Note that golang-1.10-go puts binaries in /usr/lib/go-1.8/bin. If you want them on your PATH, you need to make that change yourself.
+    > Note that golang-1.10-go puts binaries in /usr/lib/go-1.10/bin. If you want them on your PATH, you need to make that change yourself.
 
     On Mac OS X
     ```
@@ -41,11 +41,11 @@
     We recommend placing the above in your .bashrc or in a setup script so that
     you can avoid typing this every time you open a new terminal window.
 
-  * **Glide:** This project uses `Glide` to manage dependencies as well 
-    as to provide *reproducible builds*. To install `Glide`, execute the
+  * **dep:** This project uses `dep` to manage dependencies as well
+    as to provide *reproducible builds*. To install `dep`, execute the
     following command (assumes you already have Go properly installed):
     ```
-    go get -u github.com/Masterminds/glide
+    go get -u github.com/golang/dep/cmd/dep
     ```
 
 ### Installing lnd
@@ -55,17 +55,17 @@ related dependencies run the following commands:
 ```
 git clone https://github.com/lightningnetwork/lnd $GOPATH/src/github.com/lightningnetwork/lnd
 cd $GOPATH/src/github.com/lightningnetwork/lnd
-glide install
+dep ensure
 go install . ./cmd/...
 ```
 
 **Updating**
 
-To update your version of `lnd` to the latest version run the following 
+To update your version of `lnd` to the latest version run the following
 commands:
 ```
 cd $GOPATH/src/github.com/lightningnetwork/lnd
-git pull && glide install
+git pull && dep ensure
 go install . ./cmd/...
 ```
 
@@ -84,6 +84,7 @@ branch. To install, run the following commands:
 
 Install **btcd**: (must be from roasbeef fork, not from btcsuite)
 ```
+go get -u github.com/Masterminds/glide
 git clone https://github.com/roasbeef/btcd $GOPATH/src/github.com/roasbeef/btcd
 cd $GOPATH/src/github.com/roasbeef/btcd
 glide install
@@ -177,17 +178,33 @@ installing `lnd` in preparation for the
 lnd --bitcoin.active --bitcoin.testnet --debuglevel=debug --btcd.rpcuser=kek --btcd.rpcpass=kek --externalip=X.X.X.X
 ```
 
-#### Running lnd using the bitcoind backend
+#### Running lnd using the bitcoind or litecoind backend
 
-To configure your bitcoind backend for use with lnd, first complete and verify the following:
+The configuration for bitcoind and litecoind are nearly identical, the following
+steps can be mirrored with loss of generality to enable a litecoind backend.
+Setup will be described in regards to `bitcoind`, but note that `lnd` uses a
+distinct `litecoin.node=litecoind` argument and analogous subconfigurations
+prefixed by `litecoind`.
 
-- The `bitcoind` instance must
-be configured with `--txindex` just like `btcd` above
-- Additionally, since `lnd` uses [ZeroMQ](https://github.com/bitcoin/bitcoin/blob/master/doc/zmq.md) to interface with `bitcoind`, *your `bitcoind` installation must be compiled with ZMQ*. If you installed it from source, this is likely the case, but if you installed it via Homebrew in the past it may not be included ([this has now been fixed](https://github.com/Homebrew/homebrew-core/pull/23088) in the latest Homebrew recipe for bitcoin)
-- Configure the `bitcoind` instance for ZMQ with `--zmqpubrawblock` and `--zmqpubrawtx`
-(the latter is optional but allows you to see unconfirmed transactions in your
-wallet). They must be combined in the same ZMQ socket address (e.g. `--zmqpubrawblock=tcp://127.0.0.1:28332` and `--zmqpubrawtx=tcp://127.0.0.1:28332`).
-- Start `bitcoind` running against testnet, and let it complete a full sync with the testnet chain (alternatively, use `--bitcoind.regtest` instead).
+To configure your bitcoind backend for use with lnd, first complete and verify
+the following:
+
+- The `bitcoind` instance must be configured with `--txindex` just like `btcd`
+  above
+- Additionally, since `lnd` uses
+  [ZeroMQ](https://github.com/bitcoin/bitcoin/blob/master/doc/zmq.md) to
+  interface with `bitcoind`, *your `bitcoind` installation must be compiled with
+  ZMQ*. If you installed it from source, this is likely the case, but if you
+  installed it via Homebrew in the past it may not be included ([this has now
+  been fixed](https://github.com/Homebrew/homebrew-core/pull/23088) in the
+  latest Homebrew recipe for bitcoin)
+- Configure the `bitcoind` instance for ZMQ with `--zmqpubrawblock` and
+  `--zmqpubrawtx` (the latter is optional but allows you to see unconfirmed
+  transactions in your wallet). They must be combined in the same ZMQ socket
+  address (e.g. `--zmqpubrawblock=tcp://127.0.0.1:28332` and
+  `--zmqpubrawtx=tcp://127.0.0.1:28332`).
+- Start `bitcoind` running against testnet, and let it complete a full sync with
+  the testnet chain (alternatively, use `--bitcoind.regtest` instead).
 
 Here's a sample `bitcoin.conf` for use with lnd:
 ```
@@ -267,8 +284,8 @@ Notice the `[Bitcoin]` section. This section houses the parameters for the
 Bitcoin chain. `lnd` also supports Litecoin testnet4 (but not both BTC and LTC
 at the same time), so when working with Litecoin be sure to set to parameters
 for Litecoin accordingly. For node configuration, the sections are called
-`[Btcd]`, `[Bitcoind]`, `[Neutrino]`, and `[Ltcd]` depending on which chain
-and node type you're using.
+`[Btcd]`, `[Bitcoind]`, `[Neutrino]`, `[Ltcd]`, and `[Litecoind]` depending on
+which chain and node type you're using.
 
 # Accurate as of:
 - _roasbeef/btcd commit:_ `f8c02aff4e7a807ba0c1349e2db03695d8e790e8` 
