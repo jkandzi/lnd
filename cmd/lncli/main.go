@@ -170,6 +170,7 @@ func main() {
 		disconnectCommand,
 		openChannelCommand,
 		closeChannelCommand,
+		closeAllChannelsCommand,
 		listPeersCommand,
 		walletBalanceCommand,
 		channelBalanceCommand,
@@ -195,6 +196,7 @@ func main() {
 		verifyMessageCommand,
 		feeReportCommand,
 		updateChannelPolicyCommand,
+		forwardingHistoryCommand,
 	}
 
 	if err := app.Run(os.Args); err != nil {
